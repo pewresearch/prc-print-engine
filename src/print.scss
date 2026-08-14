@@ -1,0 +1,869 @@
+// Print Engine Styles
+// These styles apply to the /print document view.
+// Paged.js paginates via CSS Paged Media (@page). Running headers/footers
+// and TOC page numbers use Paged.js counters.
+// To add per-block styles, see Block_Print_Registry::register_style().
+
+// =============================================================================
+// Variables
+// =============================================================================
+$page-width: 8.5in;
+$page-height: 11in;
+$page-margin: 0.75in;
+$font-family-sans: "franklin-gothic-urw", Verdana, Geneva, sans-serif;
+$font-family-serif: Georgia, "Times New Roman", Times, serif;
+$color-gold: #bd7912;
+$color-text: #000;
+$color-text-light: #7f7f7f;
+$color-text-muted: #595959;
+
+// =============================================================================
+// Paged Media
+// =============================================================================
+@page {
+	size: $page-width $page-height;
+	margin: $page-margin;
+
+	@top-center {
+		content: counter(page) "\A PEW RESEARCH CENTER";
+		font-family: $font-family-sans;
+		font-size: 9pt;
+		font-weight: 700;
+		color: $color-text;
+		white-space: pre-line;
+		text-align: center;
+		line-height: 1.3;
+	}
+
+	@bottom-center {
+		content: "www.pewresearch.org";
+		font-family: $font-family-sans;
+		font-size: 9pt;
+		color: $color-text-muted;
+		text-align: center;
+	}
+}
+
+@page cover {
+	margin: $page-margin;
+
+	@top-center {
+		content: none;
+	}
+
+	@bottom-center {
+		content: none;
+	}
+}
+
+// =============================================================================
+// Color scheme — print content must stay light (paper), even when OS is dark.
+// Theme tokens use light-dark(); without this pin they resolve to dark-on-white.
+// prefers-color-scheme media queries still follow the OS — see dark screen chrome
+// and content overrides below.
+// =============================================================================
+:root {
+	color-scheme: only light !important;
+}
+
+// =============================================================================
+// Print view — flat white paginated layout (chrome lives in template inline CSS)
+// =============================================================================
+.print-engine-pdf-view {
+	margin: 0;
+	padding: 0;
+	background: #fff;
+	color: $color-text;
+	font-family: $font-family-sans;
+	color-scheme: only light;
+
+	// Before Paged.js runs, content sits in a letter-sized preview card.
+	.print-engine-pdf-content:not(.pagedjs-ready) {
+		max-width: $page-width;
+		margin: 0 auto;
+		background: #fff;
+		color: $color-text;
+		padding: $page-margin;
+		box-sizing: border-box;
+		color-scheme: only light;
+	}
+
+	// Theme/block dark-mode media queries still fire from OS preference.
+	// Keep caret icons and co-branded marks readable on white paper pages.
+	.wp-block-details > summary::after {
+		filter: none !important;
+		color: $color-text !important;
+	}
+}
+
+// Paged.js preview mount — seamless pages; screen chrome may tint the canvas.
+.pagedjs_pages {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0;
+	padding: 0;
+	background: #fff;
+}
+
+.pagedjs_page {
+	background: #fff;
+	color: $color-text;
+	color-scheme: only light;
+
+	@media print {
+		break-after: page;
+	}
+}
+
+// Screen-only: dark canvas around white letter pages when the OS prefers dark.
+// Does not affect @media print / Puppeteer page.pdf() (print media).
+@media screen and (prefers-color-scheme: dark) {
+	.print-engine-pdf-view {
+		background: #1a1a1a;
+	}
+
+	.pagedjs_pages {
+		background: #1a1a1a;
+		gap: 0.75rem;
+		padding: 0.75rem 0;
+	}
+
+	.pagedjs_page,
+	.print-engine-page,
+	.print-engine-pdf-view .print-engine-pdf-content:not(.pagedjs-ready) {
+		background: #fff;
+		color: $color-text;
+		color-scheme: only light;
+	}
+}
+
+// =============================================================================
+// Shared page sections
+// =============================================================================
+.print-engine-page {
+	box-sizing: border-box;
+	background: #fff;
+}
+
+.print-engine-cover {
+	page: cover;
+	break-after: page;
+	display: flex;
+	flex-direction: column;
+	justify-content: space-between;
+	// Avoid a page-tall overflow:hidden box — that is a known Paged.js
+	// infinite-loop guard trigger that silently stops pagination.
+	min-height: calc(#{$page-height} - (#{$page-margin} * 2) - 0.25in);
+	overflow: visible;
+
+	&__header {
+		display: flex;
+		justify-content: flex-end;
+		margin-bottom: 1.5rem;
+	}
+
+	&__logo {
+		display: block;
+		width: 260px !important;
+		max-width: 260px !important;
+		height: auto !important;
+		margin-left: auto;
+		object-fit: contain;
+	}
+
+	&__content {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		justify-content: flex-start;
+		padding-top: 1rem;
+	}
+
+	&__date {
+		font-family: $font-family-sans;
+		font-size: 8pt;
+		font-weight: 400;
+		color: $color-gold;
+		margin: 0 0 1rem;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+	}
+
+	&__title {
+		font-family: $font-family-serif;
+		font-size: 36pt;
+		font-weight: 700;
+		line-height: 1.15;
+		margin: 0 0 0.75rem;
+		color: $color-text;
+		border: 0;
+		padding: 0;
+	}
+
+	&__subtitle {
+		font-family: $font-family-serif;
+		font-size: 14pt;
+		font-style: italic;
+		font-weight: 400;
+		line-height: 1.35;
+		margin: 0 0 1.25rem;
+		color: $color-text;
+	}
+
+	&__bylines {
+		font-size: 10pt;
+		font-weight: 400;
+		margin: 0;
+		text-transform: none;
+		letter-spacing: 0;
+	}
+
+	&__by {
+		font-family: $font-family-sans;
+		font-weight: 700;
+		color: $color-text;
+		margin-right: 0.25em;
+		font-style: normal;
+	}
+
+	&__byline-names {
+		font-family: $font-family-serif;
+		font-style: italic;
+		font-weight: 400;
+		color: $color-text;
+	}
+
+	&__footer {
+		border-left: 1px solid #ccc;
+		padding-left: 0.85rem;
+		margin-top: 2rem;
+
+		h3 {
+			font-family: $font-family-sans;
+			font-size: 8pt;
+			font-weight: 700;
+			color: $color-gold;
+			margin: 0 0 0.4rem;
+			text-transform: uppercase;
+			letter-spacing: 0.04em;
+		}
+
+		p {
+			font-family: $font-family-sans;
+			font-size: 8pt;
+			line-height: 1.45;
+			margin: 0 0 1rem;
+			color: $color-text;
+
+			a {
+				color: $color-text;
+				text-decoration: none;
+			}
+		}
+	}
+
+	&__contact-title {
+		font-weight: 400;
+		color: $color-text-light;
+	}
+
+	&__media-contacts {
+		margin-bottom: 0.75rem;
+	}
+
+	&__citation {
+		p {
+			font-size: 8pt;
+			color: $color-text-light;
+			margin: 0;
+		}
+	}
+}
+
+// =============================================================================
+// About Page (static brand) + About this research (extracted details)
+// =============================================================================
+.print-engine-about {
+	break-after: page;
+
+	&__content {
+		padding-top: 2rem;
+	}
+
+	&__title {
+		font-family: $font-family-sans;
+		font-size: 18pt;
+		font-weight: 700;
+		margin: 0 0 1.25rem;
+		color: $color-text;
+	}
+
+	p {
+		font-family: $font-family-serif;
+		font-size: 11pt;
+		line-height: 1.55;
+		margin: 0 0 1rem;
+		color: $color-text;
+	}
+
+	&__copyright {
+		margin-top: 1.5rem;
+		font-family: $font-family-sans;
+		font-size: 10pt;
+	}
+
+	a {
+		color: $color-gold;
+		text-decoration: underline;
+	}
+}
+
+.print-engine-about-research {
+	break-after: page;
+
+	&__content {
+		padding-top: 2rem;
+	}
+
+	&__subtitle {
+		font-family: $font-family-sans;
+		font-size: 14pt;
+		font-weight: 700;
+		margin: 0 0 1rem;
+		color: $color-text;
+	}
+
+	&__extracted {
+		margin-top: 0;
+
+		& + & {
+			margin-top: 1.75rem;
+		}
+
+		p,
+		li {
+			font-family: $font-family-serif;
+			font-size: 11pt;
+			line-height: 1.55;
+		}
+	}
+
+	p {
+		font-family: $font-family-serif;
+		font-size: 11pt;
+		line-height: 1.55;
+		margin: 0 0 1rem;
+		color: $color-text;
+	}
+
+	a {
+		color: $color-gold;
+		text-decoration: underline;
+	}
+}
+
+// =============================================================================
+// Table of Contents
+// =============================================================================
+.print-engine-toc {
+	break-after: page;
+
+	&__title {
+		font-family: $font-family-sans;
+		font-size: 18pt;
+		font-weight: 700;
+		margin: 2rem 0 1.5rem;
+		padding: 0;
+		border: 0;
+		color: $color-text;
+	}
+
+	&__list {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+	}
+
+	&__item {
+		margin-bottom: 0.65rem;
+		page-break-inside: avoid;
+		break-inside: avoid;
+
+		&--part {
+			margin-top: 1rem;
+			font-weight: 700;
+		}
+
+		&--indent {
+			padding-left: 1.5rem;
+		}
+	}
+
+	// leader() is unsupported in Chromium. Dotted rule via ::before; page numbers
+	// are filled into .print-engine-toc__page by view.js after Paged.js resolves
+	// target-counter() (counter() on flex ::after does not paint reliably).
+	&__link {
+		display: flex;
+		align-items: baseline;
+		width: 100%;
+		text-decoration: none;
+		color: $color-text;
+		font-family: $font-family-sans;
+		font-size: 11pt;
+		font-weight: 700;
+		line-height: 1.45;
+
+		// Keep target-counter so Paged.js writes per-link counter-reset rules.
+		&::after {
+			content: target-counter(attr(href url), page);
+			display: none;
+		}
+	}
+
+	&__label {
+		order: 1;
+		flex: 0 1 auto;
+	}
+
+	&__leader {
+		order: 2;
+		flex: 1 1 auto;
+		border-bottom: 1px dotted $color-text;
+		margin: 0 0.4rem;
+		min-width: 1.5rem;
+		height: 0.65em;
+	}
+
+	&__page {
+		order: 3;
+		flex: 0 0 auto;
+		font-weight: 700;
+	}
+}
+
+// =============================================================================
+// Article Content
+// =============================================================================
+.print-engine-body-header {
+	margin: 0 0 1.5rem;
+
+	&__title {
+		font-family: $font-family-sans;
+		font-size: 2.5rem;
+		font-weight: bold;
+		line-height: 1.05;
+		margin: 0 0 0.5rem;
+		page-break-after: avoid;
+		break-after: avoid;
+	}
+
+	&__subtitle {
+		font-family: $font-family-serif;
+		font-size: 1.5rem;
+		font-style: italic;
+		line-height: 1.25;
+		margin: 0;
+		page-break-after: avoid;
+		break-after: avoid;
+	}
+}
+
+.print-engine-article {
+	page-break-after: auto;
+
+	&__content {
+		font-family: $font-family-serif;
+		font-size: 11pt;
+		line-height: 1.6;
+
+		h1,
+		h2,
+		h3,
+		h4,
+		h5,
+		h6 {
+			font-family: $font-family-sans;
+			page-break-after: avoid;
+		}
+
+		h2 {
+			font-size: 1.5rem;
+			margin-top: 2rem;
+			margin-bottom: 1rem;
+			padding-bottom: 0.25rem;
+			border-bottom: 1px solid #eee;
+		}
+
+		h3 {
+			font-size: 1.25rem;
+			margin-top: 1.5rem;
+			margin-bottom: 0.75rem;
+		}
+
+		p {
+			margin-block-start: 1.25rem;
+			orphans: 3;
+			widows: 3;
+		}
+
+		img {
+			max-width: 100%;
+			height: auto;
+			page-break-inside: avoid;
+		}
+
+		figure {
+			margin: 1.5rem 0;
+			page-break-inside: avoid;
+		}
+
+		figcaption {
+			font-family: $font-family-sans;
+			font-size: 0.85rem;
+			color: $color-text-light;
+			margin-top: 0.5rem;
+		}
+
+		blockquote {
+			margin: 1.5rem 0;
+			padding-left: 1rem;
+			border-left: 3px solid $color-gold;
+			font-style: italic;
+		}
+
+		table {
+			width: 100%;
+			border-collapse: collapse;
+			margin: 1.5rem 0;
+			page-break-inside: avoid;
+
+			th,
+			td {
+				padding: 0.5rem;
+				border: 1px solid #ddd;
+				text-align: left;
+				font-size: 0.9rem;
+			}
+
+			th {
+				background: #f5f5f5;
+				font-family: $font-family-sans;
+				font-weight: bold;
+			}
+		}
+
+		ul,
+		ol {
+			margin: 0 0 1rem;
+			padding-left: 1.5rem;
+		}
+
+		li {
+			margin-bottom: 0.25rem;
+		}
+
+		.alignright {
+			float: right !important;
+			max-width: 50%;
+			margin-left: 1em !important;
+			margin-bottom: 1em !important;
+		}
+
+		.alignleft {
+			float: left !important;
+			max-width: 50%;
+			margin-right: 1em !important;
+			margin-bottom: 1em !important;
+		}
+
+		.aligncenter {
+			display: block !important;
+			margin-left: auto !important;
+			margin-right: auto !important;
+		}
+
+		.print-engine-chart.alignleft,
+		.print-engine-chart.alignright {
+			max-width: 50%;
+		}
+
+		.print-engine-chart--lead {
+			margin-top: 0 !important;
+		}
+
+		.has-text-align-left {
+			text-align: left;
+		}
+
+		.has-text-align-right {
+			text-align: right;
+		}
+
+		.has-text-align-center {
+			text-align: center;
+		}
+	}
+}
+
+// =============================================================================
+// Chapter Content (for multi-section reports)
+// =============================================================================
+.print-engine-chapter {
+	page-break-before: always;
+	break-before: page;
+	page-break-after: auto;
+	// Floats from a previous chapter must not leak into the next page box.
+	clear: both;
+
+	&:first-of-type {
+		page-break-before: auto;
+		break-before: auto;
+	}
+
+	&__title {
+		font-family: $font-family-sans;
+		font-size: 1.75rem;
+		font-weight: bold;
+		margin: 0 0 1.5rem;
+		padding-bottom: 0.5rem;
+		border-bottom: 2px solid $color-gold;
+		page-break-after: avoid;
+		break-after: avoid;
+	}
+
+	&__content {
+		font-family: $font-family-serif;
+		font-size: 11pt;
+		line-height: 1.6;
+
+		&::after {
+			content: "";
+			display: table;
+			clear: both;
+		}
+
+		h1,
+		h2,
+		h3,
+		h4,
+		h5,
+		h6 {
+			font-family: $font-family-sans;
+			page-break-after: avoid;
+			break-after: avoid;
+		}
+
+		h2 {
+			font-size: 1.5rem;
+			margin-top: 2rem;
+			margin-bottom: 1rem;
+			padding-bottom: 0.25rem;
+			border-bottom: 1px solid #eee;
+		}
+
+		h3 {
+			font-size: 1.25rem;
+			margin-top: 1.5rem;
+			margin-bottom: 0.75rem;
+		}
+
+		p {
+			margin-block-start: 1.25rem;
+			orphans: 3;
+			widows: 3;
+		}
+
+		img {
+			max-width: 100%;
+			height: auto;
+			page-break-inside: avoid;
+		}
+
+		figure {
+			margin: 1.5rem 0;
+			page-break-inside: avoid;
+		}
+
+		figcaption {
+			font-family: $font-family-sans;
+			font-size: 0.85rem;
+			color: $color-text-light;
+			margin-top: 0.5rem;
+		}
+
+		blockquote {
+			margin: 1.5rem 0;
+			padding-left: 1rem;
+			border-left: 3px solid $color-gold;
+			font-style: italic;
+			page-break-inside: avoid;
+			break-inside: avoid;
+		}
+
+		table {
+			width: 100%;
+			border-collapse: collapse;
+			margin: 1.5rem 0;
+			page-break-inside: avoid;
+			break-inside: avoid;
+
+			th,
+			td {
+				padding: 0.5rem;
+				border: 1px solid #ddd;
+				text-align: left;
+				font-size: 0.9rem;
+			}
+
+			th {
+				background: #f5f5f5;
+				font-family: $font-family-sans;
+				font-weight: bold;
+			}
+		}
+
+		ul,
+		ol {
+			margin: 0 0 1rem;
+			padding-left: 1.5rem;
+		}
+
+		li {
+			margin-bottom: 0.25rem;
+		}
+
+		.wp-block-image,
+		.wp-block-chart,
+		.wp-block-prc-block-chart,
+		.wp-block-embed,
+		.wp-block-pullquote,
+		.wp-block-quote,
+		.wp-block-code,
+		.wp-block-preformatted {
+			page-break-inside: avoid;
+			break-inside: avoid;
+		}
+
+		.alignright {
+			float: right !important;
+			max-width: 50%;
+			margin-left: 1em !important;
+			margin-bottom: 1em !important;
+		}
+
+		.alignleft {
+			float: left !important;
+			max-width: 50%;
+			margin-right: 1em !important;
+			margin-bottom: 1em !important;
+		}
+
+		.aligncenter {
+			display: block !important;
+			margin-left: auto !important;
+			margin-right: auto !important;
+		}
+
+		.print-engine-chart.alignleft,
+		.print-engine-chart.alignright {
+			max-width: 50%;
+		}
+
+		.print-engine-chart--lead {
+			margin-top: 0 !important;
+		}
+
+		.has-text-align-left {
+			text-align: left;
+		}
+
+		.has-text-align-right {
+			text-align: right;
+		}
+
+		.has-text-align-center {
+			text-align: center;
+		}
+	}
+}
+
+// =============================================================================
+// Print Media Query Overrides
+// =============================================================================
+@media print {
+	header:not(.print-engine-cover__header):not(.print-engine-body-header),
+	#query-monitor-main,
+	#mobile-masthead,
+	#site-footer,
+	.yoast-breadcrumbs,
+	.wp-block-navigation,
+	.wp-block-prc-block-promo,
+	.wp-block-social-links,
+	.wp-block-prc-block-collapsible__icon {
+		display: none !important;
+	}
+
+	.wp-block-prc-block-grid-column {
+		display: none !important;
+
+		&:has(.wp-block-post-content) {
+			display: flex !important;
+			flex-direction: column !important;
+			width: 100% !important;
+		}
+	}
+
+	.wp-block-prc-block-grid-controller {
+		border: 0 !important;
+	}
+
+	[data-hide-on-print="true"] {
+		display: none !important;
+	}
+
+	[data-display-on-print="true"] {
+		display: block !important;
+	}
+
+	a[href]::after {
+		content: none !important;
+	}
+}
+
+// =============================================================================
+// Screen-only styles (hide print-only elements on normal pages)
+// =============================================================================
+@media screen {
+	body:not(.print-engine-pdf-view) [data-display-on-print="true"] {
+		display: none !important;
+	}
+}
+
+// Methodology / sortable table chrome — hide interaction UI in print document.
+.print-engine-pdf-view {
+	.prc-block-table__sort,
+	.wp-block-table .sort-button,
+	button.sortable,
+	[data-wp-on--click*="sort"] {
+		display: none !important;
+	}
+
+	table {
+		max-width: 100%;
+		overflow-wrap: anywhere;
+	}
+
+	.print-engine-chart {
+		page-break-inside: auto;
+		margin: 1.25rem 0;
+		max-height: 7.5in;
+
+		img {
+			display: block;
+			max-width: 100%;
+			max-height: 7.5in;
+			height: auto;
+		}
+	}
+}

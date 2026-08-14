@@ -1,0 +1,49 @@
+
+> @prc/print-engine@1.0.0 build
+> wp-scripts build --webpack-copy-php --source-path=src --output-path=build
+
+assets by chunk 543 KiB (name: view)
+  assets by path *.css 26.5 KiB
+    asset view-rtl.css 13.3 KiB [compared for emit] (name: view)
+    asset view.css 13.3 KiB [compared for emit] (name: view)
+  asset view.js 517 KiB [compared for emit] [minimized] [big] (name: view)
+  asset view.asset.php 98 bytes [compared for emit] (name: view)
+assets by chunk 6.55 KiB (name: index)
+  asset index.js 6.32 KiB [compared for emit] [minimized] (name: index)
+  asset index.asset.php 242 bytes [compared for emit] (name: index)
+asset block.json 273 bytes [compared for emit] [from: src/block.json] [copied]
+Entrypoint view [big] 543 KiB = view.css 13.3 KiB view.js 517 KiB view-rtl.css 13.3 KiB view.asset.php 98 bytes
+Entrypoint index 6.55 KiB = index.js 6.32 KiB index.asset.php 242 bytes
+orphan modules 470 KiB (javascript) 937 bytes (runtime) [orphan] 378 modules
+runtime modules 1.29 KiB 6 modules
+built modules 891 KiB (javascript) 13.3 KiB (css/mini-extract) [built]
+  modules by path ../../node_modules/pagedjs/ 597 KiB 122 modules
+  modules by path ../../node_modules/es5-ext/ 9.84 KiB 32 modules
+  modules by path ../../node_modules/es6-symbol/ 6.97 KiB 8 modules
+  modules by path ../../node_modules/type/ 1.42 KiB 5 modules
+  modules by path ./src/ 265 KiB (javascript) 13.3 KiB (css/mini-extract) 3 modules
+  modules by path ../../node_modules/ext/global-this/*.js 1.27 KiB 3 modules
+  modules by path ../../node_modules/event-emitter/*.js 4.08 KiB
+    ../../node_modules/event-emitter/index.js 2.93 KiB [built] [code generated]
+    ../../node_modules/event-emitter/pipe.js 1.15 KiB [built] [code generated]
+  ../../node_modules/d/index.js 1.51 KiB [built] [code generated]
+  ../../node_modules/clear-cut/index.js 3.97 KiB [built] [code generated]
+
+WARNING in asset size limit: The following asset(s) exceed the recommended size limit (244 KiB).
+This can impact web performance.
+Assets: 
+  view.js (517 KiB)
+
+WARNING in entrypoint size limit: The following entrypoint(s) combined asset size exceeds the recommended limit (244 KiB). This can impact web performance.
+Entrypoints:
+  view (543 KiB)
+      view.css
+      view.js
+      view-rtl.css
+      view.asset.php
+
+WARNING in webpack performance recommendations: 
+You can limit the size of your bundles by using import() or require.ensure to lazy load some parts of your application.
+For more info visit https://webpack.js.org/guides/code-splitting/
+
+webpack 5.106.2 compiled with 3 warnings in 8239 ms

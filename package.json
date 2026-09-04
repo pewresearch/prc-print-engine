@@ -1,6 +1,6 @@
 {
 	"name": "@prc/print-engine",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "Print-styled post preview, server-side PDF export, and a block callback registry",
 	"private": true,
 	"author": "Pew Research Center",

@@ -1,4 +1,5 @@
 /* eslint-disable max-len */
+/* eslint-env browser */
 /**
  * WordPress Dependencies
  */
@@ -144,6 +145,56 @@ function resolvePrintImageSrc(src) {
 	return src;
 }
 
+const PRINT_SIZED_IMAGE_WIDTHS = {
+	'size-200-wide': 200,
+	'size-310-wide': 310,
+	'size-420-wide': 420,
+	'size-640-wide': 640,
+};
+
+/**
+ * Return the class-name display width for a sized wp-block-image.
+ *
+ * @param {Element|null} el Figure or image.
+ * @return {number|null} Width in px, or null.
+ */
+function getPrintSizedImageWidth(el) {
+	if (!el) {
+		return null;
+	}
+	const figure = el.closest ? el.closest('figure.wp-block-image') : null;
+	const node = figure || el;
+	const className = typeof node.className === 'string' ? node.className : '';
+	const classes = className.split(/\s+/);
+	if (!classes.includes('wp-block-image')) {
+		return null;
+	}
+	for (const slug of Object.keys(PRINT_SIZED_IMAGE_WIDTHS)) {
+		if (classes.includes(slug)) {
+			return PRINT_SIZED_IMAGE_WIDTHS[slug];
+		}
+	}
+	return null;
+}
+
+/**
+ * Strip Photon/VIP size query args so print uses the original file.
+ *
+ * @param {string} src Image src.
+ * @return {string} Src without size queries.
+ */
+function stripPhotonSizeQuery(src) {
+	try {
+		const url = new URL(src, window.location.href);
+		['w', 'h', 'crop', 'resize', 'fit', 'zoom'].forEach((key) => {
+			url.searchParams.delete(key);
+		});
+		return url.toString();
+	} catch (e) {
+		return src;
+	}
+}
+
 /**
  * Preload every <img> in the content HTML so Paged.js does not stall
  * waiting on media redirects / late-decoding images mid-chunk.
@@ -160,13 +211,22 @@ async function preloadContentImages(html) {
 		if (!raw) {
 			return;
 		}
-		const resolved = resolvePrintImageSrc(raw);
+		const sizedWidth = getPrintSizedImageWidth(img);
+		let resolved = resolvePrintImageSrc(raw);
+		if (sizedWidth) {
+			resolved = stripPhotonSizeQuery(resolved);
+		}
 		img.setAttribute('src', resolved);
 		img.removeAttribute('srcset');
 		img.removeAttribute('sizes');
 		img.setAttribute('loading', 'eager');
 		img.setAttribute('decoding', 'sync');
-		img.style.maxWidth = '100%';
+		if (sizedWidth) {
+			img.style.width = `${sizedWidth}px`;
+			img.style.maxWidth = `${sizedWidth}px`;
+		} else {
+			img.style.maxWidth = '100%';
+		}
 		img.style.height = 'auto';
 	});
 
@@ -563,6 +623,7 @@ domReady(() => {
 
 	initPrintActions();
 	runPagedPreview().catch((error) => {
+		// eslint-disable-next-line no-console
 		console.error('Paged.js preview failed:', error);
 		setToolbarReady(true);
 		// Soft-fail still marks ready so headless PDF capture can proceed.

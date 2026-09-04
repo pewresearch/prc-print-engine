@@ -4,6 +4,7 @@
  *
  * @package PRC\Platform\Print_Engine
  */
+
 namespace PRC\Platform\Print_Engine;
 
 use MatthiasMullie\Minify;
@@ -14,9 +15,32 @@ use WP_Block_Type_Registry;
  * Print Engine Supports
  */
 class Print_Engine {
+	/**
+	 * Script/style handle.
+	 *
+	 * @var string
+	 */
 	public static $handle = 'prc-print-engine';
+
+	/**
+	 * Webpack view asset manifest.
+	 *
+	 * @var array
+	 */
 	public static $view_asset_file;
+
+	/**
+	 * Webpack editor controls asset manifest.
+	 *
+	 * @var array
+	 */
 	public static $controls_asset_file;
+
+	/**
+	 * Asset version string.
+	 *
+	 * @var string
+	 */
 	public static $version;
 
 	/**
@@ -33,6 +57,23 @@ class Print_Engine {
 	 */
 	private static $print_post = null;
 
+	/**
+	 * Display widths (px) for Excel/Illustrator chart image size classes.
+	 *
+	 * @var array<string, int>
+	 */
+	private const PRINT_SIZED_IMAGE_WIDTHS = array(
+		'size-200-wide' => 200,
+		'size-310-wide' => 310,
+		'size-420-wide' => 420,
+		'size-640-wide' => 640,
+	);
+
+	/**
+	 * Constructor.
+	 *
+	 * @param object $loader Hook loader.
+	 */
 	public function __construct( $loader ) {
 		$view_asset_path     = plugin_dir_path( __DIR__ ) . 'build/view.asset.php';
 		$controls_asset_path = plugin_dir_path( __DIR__ ) . 'build/index.asset.php';
@@ -55,6 +96,11 @@ class Print_Engine {
 		$this->init( $loader );
 	}
 
+	/**
+	 * Register hooks.
+	 *
+	 * @param object $loader Hook loader.
+	 */
 	public function init( $loader ) {
 		$loader->add_action( 'init', $this, 'fire_block_print_registration', 5 );
 		$loader->add_filter( 'query_vars', $this, 'add_query_vars' );
@@ -90,7 +136,11 @@ class Print_Engine {
 	}
 
 	/**
+	 * Register print query vars.
+	 *
 	 * @hook query_vars
+	 * @param array $qvars Query vars.
+	 * @return array
 	 */
 	public function add_query_vars( $qvars ) {
 		$qvars[] = 'print';
@@ -236,7 +286,7 @@ class Print_Engine {
 			$wp_query->post_count        = 1;
 			$wp_query->post              = $post;
 		}
-		$GLOBALS['post'] = $post;
+		$GLOBALS['post'] = $post; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
 		setup_postdata( $post );
 
 		status_header( 200 );
@@ -509,6 +559,8 @@ class Print_Engine {
 	}
 
 	/**
+	 * Enqueue the print document view script.
+	 *
 	 * @hook wp_enqueue_scripts
 	 * @return void
 	 */
@@ -550,6 +602,12 @@ class Print_Engine {
 		remove_action( 'wp_footer', array( $modules, 'print_a11y_script_module_html' ), 20 );
 	}
 
+	/**
+	 * List registered block names, optionally filtered by namespace.
+	 *
+	 * @param string|null $filter_by_namespace Namespace prefix, or null for all.
+	 * @return string[]
+	 */
 	public function get_block_names( $filter_by_namespace = null ) {
 		$block_names = array();
 		$block_types = WP_Block_Type_Registry::get_instance()->get_all_registered();
@@ -563,6 +621,11 @@ class Print_Engine {
 		return $block_names;
 	}
 
+	/**
+	 * Print registered block print styles into the print document stylesheet.
+	 *
+	 * @return void
+	 */
 	public function register_block_styles() {
 		// Print-view styles: output bare, no @media wrapper.
 		// Applies to the print engine web page (?pdf=true).
@@ -583,6 +646,8 @@ class Print_Engine {
 	}
 
 	/**
+	 * Enqueue print document styles and Typekit fonts.
+	 *
 	 * @hook enqueue_block_assets
 	 * @return void
 	 */
@@ -615,7 +680,7 @@ class Print_Engine {
 	 * Register additional attributes for the core-group block.
 	 *
 	 * @hook block_type_metadata 100, 1
-	 * @param mixed $metadata
+	 * @param mixed $metadata Block type metadata.
 	 * @return mixed
 	 */
 	public function add_attributes( $metadata ) {
@@ -824,7 +889,8 @@ class Print_Engine {
 				<div class="print-engine-cover__media-contacts">
 					<h3>FOR MEDIA OR OTHER INQUIRIES:</h3>
 					<p>
-						<strong><?php echo esc_html( $contact['name'] ); ?></strong><?php if ( ! empty( $contact['title'] ) ) : ?><span class="print-engine-cover__contact-title">, <?php echo esc_html( $contact['title'] ); ?></span><?php endif; ?><br>
+						<strong><?php echo esc_html( $contact['name'] ); ?></strong><?php if ( ! empty( $contact['title'] ) ) : ?>
+							<span class="print-engine-cover__contact-title">, <?php echo esc_html( $contact['title'] ); ?></span><?php endif; ?><br>
 						<?php if ( ! empty( $contact['phone'] ) ) : ?>
 							<?php echo esc_html( $contact['phone'] ); ?><br>
 						<?php endif; ?>
@@ -1249,6 +1315,95 @@ class Print_Engine {
 		$block['innerHTML']    = implode( '', $leading ) . implode( '', $trailing );
 
 		return $block;
+	}
+
+	/**
+	 * Load full-resolution files for sized chart images and drop Photon srcset.
+	 *
+	 * Excel/Illustrator chart PNGs use size-{200,310,420,640}-wide classes for
+	 * on-page width. Photon `?w=` matches that display size, so print would
+	 * rasterize at 1×. Strip size queries so the ~2× file is used, same as
+	 * Chart Builder print PNGs.
+	 *
+	 * @param string $html Post content HTML after `the_content`.
+	 * @return string HTML with sized-image srcs upgraded.
+	 */
+	private function upgrade_print_sized_images( string $html ): string {
+		if ( '' === $html || false === strpos( $html, 'size-' ) ) {
+			return $html;
+		}
+
+		$processor     = new WP_HTML_Tag_Processor( $html );
+		$pending_width = null;
+
+		while ( $processor->next_tag() ) {
+			$tag = $processor->get_tag();
+			if ( 'FIGURE' === $tag ) {
+				$pending_width = $this->print_sized_image_width_from_class(
+					$processor->get_attribute( 'class' )
+				);
+				continue;
+			}
+			if ( 'IMG' !== $tag ) {
+				continue;
+			}
+
+			$width = $pending_width;
+			if ( null === $width ) {
+				$width = $this->print_sized_image_width_from_class(
+					$processor->get_attribute( 'class' )
+				);
+			}
+			$pending_width = null;
+
+			if ( null === $width ) {
+				continue;
+			}
+
+			$src = $processor->get_attribute( 'src' );
+			if ( is_string( $src ) && '' !== $src ) {
+				$processor->set_attribute( 'src', $this->strip_photon_size_query( $src ) );
+			}
+			$processor->remove_attribute( 'srcset' );
+			$processor->remove_attribute( 'sizes' );
+		}
+
+		return $processor->get_updated_html();
+	}
+
+	/**
+	 * Return the print display width for a sized wp-block-image class list.
+	 *
+	 * @param string|null $class_attr Class attribute value.
+	 * @return int|null Width in pixels, or null when the tag is not a sized chart image.
+	 */
+	private function print_sized_image_width_from_class( $class_attr ): ?int {
+		if ( ! is_string( $class_attr ) || '' === $class_attr ) {
+			return null;
+		}
+		$classes = preg_split( '/\s+/', $class_attr, -1, PREG_SPLIT_NO_EMPTY );
+		if ( ! is_array( $classes ) || ! in_array( 'wp-block-image', $classes, true ) ) {
+			return null;
+		}
+		foreach ( self::PRINT_SIZED_IMAGE_WIDTHS as $slug => $width ) {
+			if ( in_array( $slug, $classes, true ) ) {
+				return $width;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Strip Photon/VIP image size query args so the original file is requested.
+	 *
+	 * @param string $src Image URL.
+	 * @return string URL without size queries.
+	 */
+	private function strip_photon_size_query( string $src ): string {
+		return remove_query_arg(
+			array( 'w', 'h', 'crop', 'resize', 'fit', 'zoom' ),
+			$src
+		);
 	}
 
 	/**
@@ -1737,6 +1892,7 @@ class Print_Engine {
 		$raw      = null !== $prepared_content ? $prepared_content : $post->post_content;
 		$content = $this->hoist_lead_floated_chart( apply_filters( 'the_content', $raw ) );
 		$content = $this->strip_orphan_closing_divs( $content );
+		$content = $this->upgrade_print_sized_images( $content );
 
 		ob_start();
 		?>
@@ -1791,6 +1947,7 @@ class Print_Engine {
 		$raw         = null !== $prepared_content ? $prepared_content : $chapter_post->post_content;
 		$content     = $this->hoist_lead_floated_chart( apply_filters( 'the_content', $raw ) );
 		$content     = $this->strip_orphan_closing_divs( $content );
+		$content     = $this->upgrade_print_sized_images( $content );
 		$is_overview = '' !== $cover_title && $this->titles_match( $title, $cover_title );
 
 		ob_start();
@@ -1886,9 +2043,11 @@ class Print_Engine {
 	}
 
 	/**
+	 * Filter rendered block markup for the print document.
+	 *
 	 * @hook render_block 100, 2
-	 * @param mixed $block_content
-	 * @param mixed $block
+	 * @param mixed $block_content Rendered block HTML.
+	 * @param mixed $block         Block array.
 	 * @return mixed
 	 */
 	public function render( $block_content, $block ) {

@@ -78,7 +78,6 @@ namespace PRC\Platform\Print_Engine {
 		public function expose_options( array $attributes ): array {
 			$ref = new \ReflectionClass( Print_Engine::class );
 			$m   = $ref->getMethod( 'get_print_visibility_options' );
-			$m->setAccessible( true );
 			return $m->invoke( $this, $attributes );
 		}
 	};

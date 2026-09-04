@@ -78,6 +78,6 @@ add_action( 'prc_print_engine_register_block_callbacks', function () {
 
 ## Access model
 
-Staff-beta: browser `/print` and print discovery / report-materials links require a logged-in WordPress user. Anonymous requests fall through (no login redirect). Server-side PDF generation continues without a WP session by minting a short-lived, post-bound machine-fetch ticket on the `/print` URL Firebase fetches.
+Staff-beta: browser `/print` and print discovery / report-materials links require a logged-in WordPress user. Anonymous `/print` requests 404 (no login redirect) so WordPress cannot 404-guess a `print-*` post. Server-side PDF generation continues without a WP session by minting a short-lived, post-bound machine-fetch ticket on the `/print` URL Firebase fetches.
 
 Content eligibility is unchanged and separate from audience access: published posts/pages with `prc-print-engine` support may be printable; password-protected posts require a valid password cookie (or `read_post`); drafts require capability or a valid preview nonce. Automatic PDF generation still runs only for publicly published, non-password-protected posts.

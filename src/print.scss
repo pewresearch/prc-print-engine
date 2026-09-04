@@ -12,6 +12,8 @@ $page-height: 11in;
 $page-margin: 0.75in;
 $font-family-sans: "franklin-gothic-urw", Verdana, Geneva, sans-serif;
 $font-family-serif: Georgia, "Times New Roman", Times, serif;
+// Abril Text lives in Typekit kit tic0xoy (same kit as the design system).
+$font-family-abril: "abril-text", Georgia, "Times New Roman", Times, serif;
 $color-gold: #bd7912;
 $color-text: #000;
 $color-text-light: #7f7f7f;
@@ -25,12 +27,11 @@ $color-text-muted: #595959;
 	margin: $page-margin;
 
 	@top-center {
-		content: counter(page) "\A PEW RESEARCH CENTER";
+		content: counter(page);
 		font-family: $font-family-sans;
 		font-size: 9pt;
 		font-weight: 700;
 		color: $color-text;
-		white-space: pre-line;
 		text-align: center;
 		line-height: 1.3;
 	}
@@ -106,6 +107,32 @@ $color-text-muted: #595959;
 	background: #fff;
 }
 
+// Running header: Paged.js puts @page content on ::after, so the numeral and
+// "PEW RESEARCH CENTER" cannot share one generated string with two weights.
+.pagedjs_margin-top-center.hasContent .pagedjs_margin-content {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	font-family: $font-family-sans;
+	font-size: 9pt;
+	line-height: 1.3;
+	text-align: center;
+
+	&::after {
+		font-weight: 700 !important;
+		color: $color-text !important;
+		order: 1;
+	}
+
+	&::before {
+		content: "PEW RESEARCH CENTER";
+		font-weight: 400;
+		color: $color-text-light;
+		order: 2;
+		white-space: nowrap;
+	}
+}
+
 .pagedjs_page {
 	background: #fff;
 	color: $color-text;
@@ -165,8 +192,9 @@ $color-text-muted: #595959;
 
 	&__logo {
 		display: block;
-		width: 260px !important;
-		max-width: 260px !important;
+		width: 285px !important;
+		min-width: 285px !important;
+		max-width: 285px !important;
 		height: auto !important;
 		margin-left: auto;
 		object-fit: contain;
@@ -191,22 +219,33 @@ $color-text-muted: #595959;
 	}
 
 	&__title {
-		font-family: $font-family-serif;
-		font-size: 36pt;
-		font-weight: 700;
-		line-height: 1.15;
+		font-family: $font-family-abril !important;
+		font-size: 54px !important;
+		font-weight: 600 !important;
+		line-height: 62px !important;
 		margin: 0 0 0.75rem;
 		color: $color-text;
-		border: 0;
+		border: 0 !important;
+		border-bottom: none !important;
+		box-shadow: none !important;
+		text-decoration: none !important;
 		padding: 0;
+		background: none;
+
+		&::before,
+		&::after {
+			content: none !important;
+			border: 0 !important;
+			display: none !important;
+		}
 	}
 
 	&__subtitle {
-		font-family: $font-family-serif;
-		font-size: 14pt;
+		font-family: $font-family-abril !important;
+		font-size: 18px !important;
 		font-style: italic;
-		font-weight: 400;
-		line-height: 1.35;
+		font-weight: 400 !important;
+		line-height: 27px !important;
 		margin: 0 0 1.25rem;
 		color: $color-text;
 	}
@@ -221,7 +260,9 @@ $color-text-muted: #595959;
 
 	&__by {
 		font-family: $font-family-sans;
-		font-weight: 700;
+		// Typekit Franklin Gothic URW Demi/Medium is weight 500.
+		font-weight: 500 !important;
+		font-size: 13px !important;
 		color: $color-text;
 		margin-right: 0.25em;
 		font-style: normal;
@@ -229,6 +270,7 @@ $color-text-muted: #595959;
 
 	&__byline-names {
 		font-family: $font-family-serif;
+		font-size: 15px !important;
 		font-style: italic;
 		font-weight: 400;
 		color: $color-text;
@@ -238,10 +280,11 @@ $color-text-muted: #595959;
 		border-left: 1px solid #ccc;
 		padding-left: 0.85rem;
 		margin-top: 2rem;
+		font-size: 12px !important;
 
 		h3 {
 			font-family: $font-family-sans;
-			font-size: 8pt;
+			font-size: 12px !important;
 			font-weight: 700;
 			color: $color-gold;
 			margin: 0 0 0.4rem;
@@ -251,7 +294,7 @@ $color-text-muted: #595959;
 
 		p {
 			font-family: $font-family-sans;
-			font-size: 8pt;
+			font-size: 12px !important;
 			line-height: 1.45;
 			margin: 0 0 1rem;
 			color: $color-text;
@@ -274,7 +317,7 @@ $color-text-muted: #595959;
 
 	&__citation {
 		p {
-			font-size: 8pt;
+			font-size: 12px !important;
 			color: $color-text-light;
 			margin: 0;
 		}
@@ -328,7 +371,8 @@ $color-text-muted: #595959;
 
 	&__subtitle {
 		font-family: $font-family-sans;
-		font-size: 14pt;
+		font-size: 18pt !important;
+		line-height: 20pt !important;
 		font-weight: 700;
 		margin: 0 0 1rem;
 		color: $color-text;
@@ -449,8 +493,8 @@ $color-text-muted: #595959;
 	margin: 0 0 1.5rem;
 
 	&__title {
-		font-family: $font-family-sans;
-		font-size: 2.5rem;
+		font-family: var(--wp--preset--font-family--serif) !important;
+		font-size: 22pt !important;
 		font-weight: bold;
 		line-height: 1.05;
 		margin: 0 0 0.5rem;
@@ -459,8 +503,8 @@ $color-text-muted: #595959;
 	}
 
 	&__subtitle {
-		font-family: $font-family-serif;
-		font-size: 1.5rem;
+		font-family: var(--wp--preset--font-family--serif) !important;
+		font-size: 16pt !important;
 		font-style: italic;
 		line-height: 1.25;
 		margin: 0;
@@ -626,8 +670,7 @@ $color-text-muted: #595959;
 		font-size: 1.75rem;
 		font-weight: bold;
 		margin: 0 0 1.5rem;
-		padding-bottom: 0.5rem;
-		border-bottom: 2px solid $color-gold;
+		border-bottom: none !important;
 		page-break-after: avoid;
 		break-after: avoid;
 	}
@@ -666,6 +709,10 @@ $color-text-muted: #595959;
 			font-size: 1.25rem;
 			margin-top: 1.5rem;
 			margin-bottom: 0.75rem;
+		}
+
+		h3.wp-block-heading {
+			font-family: var(--wp--preset--font-family--serif) !important;
 		}
 
 		p {
@@ -784,6 +831,40 @@ $color-text-muted: #595959;
 
 		.has-text-align-center {
 			text-align: center;
+		}
+	}
+}
+
+// H5 subheads: 11pt Georgia italic / 13pt. Kill theme uppercase tracking.
+.print-engine-article__content,
+.print-engine-chapter__content {
+	h5,
+	h5.wp-block-heading {
+		font-family: $font-family-serif !important;
+		font-size: 11pt !important;
+		font-style: italic !important;
+		font-weight: 400 !important;
+		line-height: 13pt !important;
+		text-transform: none !important;
+		letter-spacing: 0 !important;
+	}
+}
+
+// Excel/Illustrator chart images: keep the class-name display width and let
+// the img load the full-resolution file (Photon size queries stripped in PHP/JS).
+// Scope to the print document (including Paged.js page boxes) so the width
+// survives pagination, not only the pre-pagination article wrapper.
+.print-engine-pdf-view {
+	@each $px in (200, 310, 420, 640) {
+		.wp-block-image.size-#{$px}-wide {
+			max-width: #{$px}px !important;
+			width: #{$px}px;
+
+			img {
+				max-width: 100% !important;
+				width: 100%;
+				height: auto;
+			}
 		}
 	}
 }

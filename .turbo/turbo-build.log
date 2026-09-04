@@ -1,49 +1,50 @@
 
-> @prc/print-engine@1.0.0 build
+> @prc/print-engine@1.0.1 build
 > wp-scripts build --webpack-copy-php --source-path=src --output-path=build
 
-assets by chunk 543 KiB (name: view)
-  assets by path *.css 26.5 KiB
-    asset view-rtl.css 13.3 KiB [compared for emit] (name: view)
-    asset view.css 13.3 KiB [compared for emit] (name: view)
-  asset view.js 517 KiB [compared for emit] [minimized] [big] (name: view)
-  asset view.asset.php 98 bytes [compared for emit] (name: view)
+assets by chunk 548 KiB (name: view)
+  assets by path [1m[32m*.css[39m[22m 30.9 KiB
+    asset [1m[32mview-rtl.css[39m[22m 15.5 KiB [1m[32m[emitted][39m[22m (name: view)
+    asset [1m[32mview.css[39m[22m 15.4 KiB [1m[32m[emitted][39m[22m (name: view)
+  asset [1m[33mview.js[39m[22m [1m[33m517 KiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[minimized][39m[22m [1m[33m[big][39m[22m (name: view)
+  asset [1m[32mview.asset.php[39m[22m 98 bytes [1m[32m[emitted][39m[22m (name: view)
 assets by chunk 6.55 KiB (name: index)
-  asset index.js 6.32 KiB [compared for emit] [minimized] (name: index)
-  asset index.asset.php 242 bytes [compared for emit] (name: index)
-asset block.json 273 bytes [compared for emit] [from: src/block.json] [copied]
-Entrypoint view [big] 543 KiB = view.css 13.3 KiB view.js 517 KiB view-rtl.css 13.3 KiB view.asset.php 98 bytes
-Entrypoint index 6.55 KiB = index.js 6.32 KiB index.asset.php 242 bytes
-orphan modules 470 KiB (javascript) 937 bytes (runtime) [orphan] 378 modules
+  asset [1m[32mindex.js[39m[22m 6.32 KiB [1m[32m[emitted][39m[22m [1m[32m[minimized][39m[22m (name: index)
+  asset [1m[32mindex.asset.php[39m[22m 242 bytes [1m[32m[emitted][39m[22m (name: index)
+asset [1m[32mblock.json[39m[22m 273 bytes [1m[32m[emitted][39m[22m [from: src/block.json] [1m[32m[copied][39m[22m
+Entrypoint [1mview[39m[22m [1m[33m[big][39m[22m 548 KiB = [1m[32mview.css[39m[22m 15.4 KiB [1m[32mview.js[39m[22m 517 KiB [1m[32mview-rtl.css[39m[22m 15.5 KiB [1m[32mview.asset.php[39m[22m 98 bytes
+Entrypoint [1mindex[39m[22m 6.55 KiB = [1m[32mindex.js[39m[22m 6.32 KiB [1m[32mindex.asset.php[39m[22m 242 bytes
+orphan modules 473 KiB (javascript) 937 bytes (runtime) [1m[33m[orphan][39m[22m 378 modules
 runtime modules 1.29 KiB 6 modules
-built modules 891 KiB (javascript) 13.3 KiB (css/mini-extract) [built]
-  modules by path ../../node_modules/pagedjs/ 597 KiB 122 modules
-  modules by path ../../node_modules/es5-ext/ 9.84 KiB 32 modules
-  modules by path ../../node_modules/es6-symbol/ 6.97 KiB 8 modules
-  modules by path ../../node_modules/type/ 1.42 KiB 5 modules
-  modules by path ./src/ 265 KiB (javascript) 13.3 KiB (css/mini-extract) 3 modules
-  modules by path ../../node_modules/ext/global-this/*.js 1.27 KiB 3 modules
-  modules by path ../../node_modules/event-emitter/*.js 4.08 KiB
-    ../../node_modules/event-emitter/index.js 2.93 KiB [built] [code generated]
-    ../../node_modules/event-emitter/pipe.js 1.15 KiB [built] [code generated]
-  ../../node_modules/d/index.js 1.51 KiB [built] [code generated]
-  ../../node_modules/clear-cut/index.js 3.97 KiB [built] [code generated]
+built modules 893 KiB (javascript) 15.4 KiB (css/mini-extract) [1m[33m[built][39m[22m
+  modules by path [1m../../node_modules/pagedjs/[39m[22m 597 KiB 122 modules
+  modules by path [1m../../node_modules/es5-ext/[39m[22m 9.84 KiB 32 modules
+  modules by path [1m../../node_modules/es6-symbol/[39m[22m 6.97 KiB 8 modules
+  modules by path [1m../../node_modules/type/[39m[22m 1.42 KiB 5 modules
+  modules by path [1m./src/[39m[22m 267 KiB (javascript) 15.4 KiB (css/mini-extract) 3 modules
+  modules by path [1m../../node_modules/ext/global-this/*.js[39m[22m 1.27 KiB 3 modules
+  modules by path [1m../../node_modules/event-emitter/*.js[39m[22m 4.08 KiB
+    [1m../../node_modules/event-emitter/index.js[39m[22m 2.93 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+    [1m../../node_modules/event-emitter/pipe.js[39m[22m 1.15 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  [1m../../node_modules/d/index.js[39m[22m 1.51 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  [1m../../node_modules/clear-cut/index.js[39m[22m 3.97 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
 
-WARNING in asset size limit: The following asset(s) exceed the recommended size limit (244 KiB).
+[1m[33mWARNING[39m[22m in [1masset size limit: The following asset(s) exceed the recommended size limit (244 KiB).
 This can impact web performance.
 Assets: 
-  view.js (517 KiB)
+  view.js (517 KiB)[39m[22m
 
-WARNING in entrypoint size limit: The following entrypoint(s) combined asset size exceeds the recommended limit (244 KiB). This can impact web performance.
+[1m[33mWARNING[39m[22m in [1mentrypoint size limit: The following entrypoint(s) combined asset size exceeds the recommended limit (244 KiB). This can impact web performance.
 Entrypoints:
-  view (543 KiB)
+  view (548 KiB)
       view.css
       view.js
       view-rtl.css
       view.asset.php
+[39m[22m
 
-WARNING in webpack performance recommendations: 
+[1m[33mWARNING[39m[22m in [1mwebpack performance recommendations: 
 You can limit the size of your bundles by using import() or require.ensure to lazy load some parts of your application.
-For more info visit https://webpack.js.org/guides/code-splitting/
+For more info visit https://webpack.js.org/guides/code-splitting/[39m[22m
 
-webpack 5.106.2 compiled with 3 warnings in 8239 ms
+webpack 5.106.2 compiled with [1m[33m3 warnings[39m[22m in 4736 ms

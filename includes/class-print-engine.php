@@ -70,6 +70,13 @@ class Print_Engine {
 	);
 
 	/**
+	 * Key terms / terminology details extracted for a front-matter page.
+	 *
+	 * @var array<int, array{title:string,html:string}>
+	 */
+	private $glossary_chunks = array();
+
+	/**
 	 * Constructor.
 	 *
 	 * @param object $loader Hook loader.
@@ -310,8 +317,9 @@ class Print_Engine {
 		$is_report   = $this->is_report_package( $post->ID );
 		$report_post = $is_report ? $this->get_report_parent_post( $post ) : $post;
 
-		// Pre-pass: strip front-matter and extract About / Pew-Knight details for the about page.
-		$research_html   = '';
+		// Pre-pass: strip front-matter and extract About / Pew-Knight / glossary details.
+		$this->glossary_chunks = array();
+		$research_html         = '';
 		$pew_knight_html = '';
 		$body_html       = '';
 		$seen_hashes     = array();
@@ -471,6 +479,7 @@ class Print_Engine {
 			<div id="print-engine-content" class="print-engine-pdf-content">
 				<?php echo $this->render_cover_sheet( $report_post ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
 				<?php echo $this->render_about_page( $report_post, $research_html, $pew_knight_html ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+				<?php echo $this->render_glossary_page(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
 				<?php echo $this->render_table_of_contents( $report_post, $research_html, $pew_knight_html ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
 				<?php echo $body_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
 			</div>
@@ -985,6 +994,30 @@ class Print_Engine {
 	}
 
 	/**
+	 * Render Key terms / Terminology details as a front-matter page before the TOC.
+	 *
+	 * @return string
+	 */
+	private function render_glossary_page(): string {
+		if ( empty( $this->glossary_chunks ) ) {
+			return '';
+		}
+
+		ob_start();
+		?>
+		<section id="print-engine-glossary" class="print-engine-page print-engine-glossary">
+			<div class="print-engine-glossary__content">
+				<?php foreach ( $this->glossary_chunks as $chunk ) : ?>
+					<h2 class="print-engine-glossary__title"><?php echo esc_html( $chunk['title'] ); ?></h2>
+					<?php echo $chunk['html']; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+				<?php endforeach; ?>
+			</div>
+		</section>
+		<?php
+		return ob_get_clean();
+	}
+
+	/**
 	 * Return extracted HTML only if its normalized text has not been seen before.
 	 *
 	 * Chapters in a report package often repeat the same About-this-research /
@@ -1102,6 +1135,11 @@ class Print_Engine {
 						$this->render_details_inner( $block ),
 						$seen_hashes
 					);
+					++$i;
+					continue;
+				}
+				if ( 'glossary' === $kind ) {
+					$this->collect_glossary_chunk( $block, $seen_hashes );
 					++$i;
 					continue;
 				}
@@ -1231,6 +1269,10 @@ class Print_Engine {
 						$this->render_details_inner( $block ),
 						$seen_hashes
 					);
+					continue;
+				}
+				if ( 'glossary' === $kind ) {
+					$this->collect_glossary_chunk( $block, $seen_hashes );
 					continue;
 				}
 			}
@@ -1372,6 +1414,25 @@ class Print_Engine {
 	}
 
 	/**
+	 * Keep remaining details boxes open in print (not collapsible).
+	 *
+	 * @param string $content Rendered body HTML.
+	 * @return string
+	 */
+	private function expand_print_details( string $content ): string {
+		if ( '' === $content || false === strpos( $content, '<details' ) ) {
+			return $content;
+		}
+
+		$processor = new WP_HTML_Tag_Processor( $content );
+		while ( $processor->next_tag( 'DETAILS' ) ) {
+			$processor->set_attribute( 'open', true );
+		}
+
+		return $processor->get_updated_html();
+	}
+
+	/**
 	 * Return the print display width for a sized wp-block-image class list.
 	 *
 	 * @param string|null $class_attr Class attribute value.
@@ -1404,6 +1465,251 @@ class Print_Engine {
 			array( 'w', 'h', 'crop', 'resize', 'fit', 'zoom' ),
 			$src
 		);
+	}
+
+	/**
+	 * Apply print chart reflow: right-only floats, 640 stack, keep intro with chart.
+	 *
+	 * @param string $content Rendered body HTML.
+	 * @return string
+	 */
+	private function reflow_print_charts( string $content ): string {
+		$content = $this->remap_floated_charts_to_right( $content );
+		return $this->wrap_chart_intro_units( $content );
+	}
+
+	/**
+	 * Companion print charts always float right. 640-wide figures stack (no wrap).
+	 *
+	 * @param string $content Rendered body HTML.
+	 * @return string
+	 */
+	private function remap_floated_charts_to_right( string $content ): string {
+		if ( '' === $content || false === strpos( $content, '<figure' ) ) {
+			return $content;
+		}
+
+		$processor = new WP_HTML_Tag_Processor( $content );
+		while ( $processor->next_tag( 'FIGURE' ) ) {
+			if ( ! $this->processor_is_print_chart_figure( $processor ) ) {
+				continue;
+			}
+			if ( $this->processor_figure_should_stack( $processor ) ) {
+				$processor->remove_class( 'alignleft' );
+				$processor->remove_class( 'alignright' );
+				$processor->add_class( 'aligncenter' );
+				$processor->add_class( 'print-engine-chart--stack' );
+				continue;
+			}
+			if ( $processor->has_class( 'alignleft' ) ) {
+				$processor->remove_class( 'alignleft' );
+				$processor->add_class( 'alignright' );
+			}
+		}
+
+		return $processor->get_updated_html();
+	}
+
+	/**
+	 * Whether the current FIGURE tag is a print chart or sized Excel image.
+	 *
+	 * @param WP_HTML_Tag_Processor $processor Tag processor paused on FIGURE.
+	 * @return bool
+	 */
+	private function processor_is_print_chart_figure( WP_HTML_Tag_Processor $processor ): bool {
+		if ( $processor->has_class( 'print-engine-chart' ) ) {
+			return true;
+		}
+		return null !== $this->print_sized_image_width_from_class( $processor->get_attribute( 'class' ) );
+	}
+
+	/**
+	 * Whether the current FIGURE should stack at full measure (no float).
+	 *
+	 * @param WP_HTML_Tag_Processor $processor Tag processor paused on FIGURE.
+	 * @return bool
+	 */
+	private function processor_figure_should_stack( WP_HTML_Tag_Processor $processor ): bool {
+		if ( $processor->has_class( 'size-640-wide' ) || $processor->has_class( 'print-engine-chart--stack' ) ) {
+			return true;
+		}
+		$style = $processor->get_attribute( 'style' );
+		if ( ! is_string( $style ) || '' === $style ) {
+			return false;
+		}
+		return (bool) preg_match( '/(?:^|[^\d])640px/', $style );
+	}
+
+	/**
+	 * Wrap headings + intro paragraph immediately before each print chart.
+	 *
+	 * The lead stays a sibling of the figure so right floats still wrap later
+	 * copy. CSS `break-after: avoid` keeps the lead with the figure on a break.
+	 *
+	 * @param string $content Rendered body HTML.
+	 * @return string
+	 */
+	private function wrap_chart_intro_units( string $content ): string {
+		if ( '' === $content || false === strpos( $content, '<figure' ) ) {
+			return $content;
+		}
+
+		$document = new \DOMDocument();
+		$previous = libxml_use_internal_errors( true );
+		$loaded   = $document->loadHTML(
+			'<?xml encoding="utf-8"><div id="prc-print-kt-root">' . $content . '</div>',
+			LIBXML_HTML_NODEFDTD
+		);
+		libxml_clear_errors();
+		libxml_use_internal_errors( $previous );
+		if ( ! $loaded ) {
+			return $content;
+		}
+
+		$root = $document->getElementById( 'prc-print-kt-root' );
+		if ( ! $root instanceof \DOMElement ) {
+			return $content;
+		}
+
+		// phpcs:disable WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- PHP DOM API.
+		$figures = array();
+		foreach ( $root->getElementsByTagName( 'figure' ) as $figure ) {
+			if ( $figure instanceof \DOMElement && $this->dom_is_print_chart_figure( $figure ) ) {
+				$figures[] = $figure;
+			}
+		}
+
+		foreach ( $figures as $figure ) {
+			$this->dom_wrap_chart_intro_lead( $document, $figure );
+		}
+
+		$inner = '';
+		foreach ( $root->childNodes as $child ) {
+			$inner .= $document->saveHTML( $child );
+		}
+		// phpcs:enable WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+		return $inner;
+	}
+
+	/**
+	 * Whether a DOM figure is a print chart or sized Excel image.
+	 *
+	 * @param \DOMElement $figure Figure node.
+	 * @return bool
+	 */
+	private function dom_is_print_chart_figure( \DOMElement $figure ): bool {
+		$class = $figure->getAttribute( 'class' );
+		if ( '' === $class ) {
+			return false;
+		}
+		$classes = preg_split( '/\s+/', $class, -1, PREG_SPLIT_NO_EMPTY );
+		if ( ! is_array( $classes ) ) {
+			return false;
+		}
+		if ( in_array( 'print-engine-chart', $classes, true ) ) {
+			return true;
+		}
+		return null !== $this->print_sized_image_width_from_class( $class );
+	}
+
+	/**
+	 * Move immediately preceding headings + intro paragraph into a lead wrapper.
+	 *
+	 * @param \DOMDocument $document Document.
+	 * @param \DOMElement  $figure   Chart figure.
+	 */
+	private function dom_wrap_chart_intro_lead( \DOMDocument $document, \DOMElement $figure ): void {
+		// phpcs:disable WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- PHP DOM API.
+		$parent = $figure->parentNode;
+		if ( ! $parent instanceof \DOMNode ) {
+			return;
+		}
+
+		$previous = $this->dom_previous_significant_element( $figure );
+		if ( $previous instanceof \DOMElement && $this->dom_has_class( $previous, 'print-engine-chart-unit__lead' ) ) {
+			return;
+		}
+
+		$collected = array();
+		$node      = $previous;
+		if ( $node instanceof \DOMElement && 'p' === strtolower( $node->tagName ) ) {
+			array_unshift( $collected, $node );
+			$node = $this->dom_previous_significant_element( $node );
+		}
+		while ( $node instanceof \DOMElement && $this->dom_is_heading( $node ) ) {
+			array_unshift( $collected, $node );
+			$node = $this->dom_previous_significant_element( $node );
+		}
+
+		if ( empty( $collected ) ) {
+			return;
+		}
+
+		$lead = $document->createElement( 'div' );
+		$lead->setAttribute( 'class', 'print-engine-chart-unit__lead' );
+		$parent->insertBefore( $lead, $collected[0] );
+		foreach ( $collected as $item ) {
+			$lead->appendChild( $item );
+		}
+		// phpcs:enable WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+	}
+
+	/**
+	 * Previous element sibling, skipping empty paragraphs.
+	 *
+	 * @param \DOMNode $node Node.
+	 * @return \DOMElement|null
+	 */
+	private function dom_previous_significant_element( \DOMNode $node ): ?\DOMElement {
+		// phpcs:disable WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- PHP DOM API.
+		$candidate = $node->previousSibling;
+		while ( $candidate instanceof \DOMNode ) {
+			if ( $candidate instanceof \DOMElement ) {
+				$is_empty_p = 'p' === strtolower( $candidate->tagName ) && $this->dom_is_empty_element( $candidate );
+				if ( ! $is_empty_p ) {
+					return $candidate;
+				}
+			}
+			$candidate = $candidate->previousSibling;
+		}
+		// phpcs:enable WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+		return null;
+	}
+
+	/**
+	 * Whether a DOM element is an h1–h6 heading.
+	 *
+	 * @param \DOMElement $element Element.
+	 * @return bool
+	 */
+	private function dom_is_heading( \DOMElement $element ): bool {
+		// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- PHP DOM API.
+		return (bool) preg_match( '/^h[1-6]$/i', $element->tagName );
+	}
+
+	/**
+	 * Whether a DOM element has no visible text.
+	 *
+	 * @param \DOMElement $element Element.
+	 * @return bool
+	 */
+	private function dom_is_empty_element( \DOMElement $element ): bool {
+		// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- PHP DOM API.
+		$text = html_entity_decode( (string) $element->textContent, ENT_QUOTES, 'UTF-8' );
+		$text = str_replace( "\xC2\xA0", ' ', $text );
+		return '' === trim( $text );
+	}
+
+	/**
+	 * Whether a DOM element has a given class name.
+	 *
+	 * @param \DOMElement $element    Element.
+	 * @param string      $class_name Class name.
+	 * @return bool
+	 */
+	private function dom_has_class( \DOMElement $element, string $class_name ): bool {
+		$classes = preg_split( '/\s+/', $element->getAttribute( 'class' ), -1, PREG_SPLIT_NO_EMPTY );
+		return is_array( $classes ) && in_array( $class_name, $classes, true );
 	}
 
 	/**
@@ -1559,11 +1865,13 @@ class Print_Engine {
 					$this->render_details_inner( $block ),
 					$seen_hashes
 				);
-			} else {
+			} elseif ( 'pew_knight' === $kind ) {
 				$pew_knight_html .= $this->dedupe_extracted_html(
 					$this->render_details_inner( $block ),
 					$seen_hashes
 				);
+			} elseif ( 'glossary' === $kind ) {
+				$this->collect_glossary_chunk( $block, $seen_hashes );
 			}
 		}
 
@@ -1575,10 +1883,10 @@ class Print_Engine {
 	}
 
 	/**
-	 * Classify a core/details block as research, pew_knight, or neither.
+	 * Classify a core/details block as research, pew_knight, glossary, or neither.
 	 *
 	 * @param array $block Parsed details block.
-	 * @return string 'research'|'pew_knight'|''
+	 * @return string 'research'|'pew_knight'|'glossary'|''
 	 */
 	private function classify_details_block( array $block ): string {
 		$class = (string) ( $block['attrs']['className'] ?? '' );
@@ -1596,8 +1904,42 @@ class Print_Engine {
 		) {
 			return 'pew_knight';
 		}
+		if ( $this->is_glossary_summary( $summary ) ) {
+			return 'glossary';
+		}
 
 		return '';
+	}
+
+	/**
+	 * Whether a details summary is a Key terms / Terminology box.
+	 *
+	 * @param string $summary Normalized summary.
+	 * @return bool
+	 */
+	private function is_glossary_summary( string $summary ): bool {
+		return in_array( $summary, array( 'key terms', 'key term', 'terminology' ), true );
+	}
+
+	/**
+	 * Store a glossary details box for the front-matter page.
+	 *
+	 * @param array $block       Parsed details block.
+	 * @param array $seen_hashes Dedupe accumulator.
+	 */
+	private function collect_glossary_chunk( array $block, array &$seen_hashes ): void {
+		$html = $this->dedupe_extracted_html( $this->render_details_inner( $block ), $seen_hashes );
+		if ( '' === $html ) {
+			return;
+		}
+		$title = $this->get_details_summary_label( $block );
+		if ( '' === $title ) {
+			$title = 'Key terms';
+		}
+		$this->glossary_chunks[] = array(
+			'title' => $title,
+			'html'  => $html,
+		);
 	}
 
 	/**
@@ -1618,6 +1960,26 @@ class Print_Engine {
 		$summary = html_entity_decode( $summary, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
 		$summary = (string) preg_replace( '/\s+/u', ' ', $summary );
 		return strtolower( trim( $summary ) );
+	}
+
+	/**
+	 * Display title from a core/details summary (original casing).
+	 *
+	 * @param array $block Parsed details block.
+	 * @return string
+	 */
+	private function get_details_summary_label( array $block ): string {
+		$inner_html = (string) ( $block['innerHTML'] ?? '' );
+		if ( '' === $inner_html ) {
+			return '';
+		}
+		if ( 1 !== preg_match( '#<summary\b[^>]*>(.*?)</summary>#is', $inner_html, $matches ) ) {
+			return '';
+		}
+		$summary = wp_strip_all_tags( (string) $matches[1] );
+		$summary = html_entity_decode( $summary, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+		$summary = (string) preg_replace( '/\s+/u', ' ', $summary );
+		return trim( $summary );
 	}
 
 	/**
@@ -1670,15 +2032,25 @@ class Print_Engine {
 	 */
 	private function find_headings_in_blocks( $blocks, &$headings ) {
 		foreach ( $blocks as $block ) {
-			if ( 'core/heading' === ( $block['blockName'] ?? '' ) ) {
-				$level = isset( $block['attrs']['level'] ) ? (int) $block['attrs']['level'] : 2;
-				if ( 2 === $level ) {
+			$name = $block['blockName'] ?? '';
+			if ( 'core/details' === $name ) {
+				continue;
+			}
+			if ( 'core/heading' === $name ) {
+				$attrs   = isset( $block['attrs'] ) && is_array( $block['attrs'] ) ? $block['attrs'] : array();
+				$level   = isset( $attrs['level'] ) ? (int) $attrs['level'] : 2;
+				$hidden  = ! empty( $this->get_print_visibility_options( $attrs )['hideOnPrint'] );
+				$keep_h2 = 2 === $level;
+				$keep_h3 = 3 === $level && ! $hidden;
+				if ( $keep_h2 || $keep_h3 ) {
 					$text = trim( wp_strip_all_tags( $block['innerHTML'] ?? '' ) );
 					if ( ! empty( $text ) ) {
-						$anchor     = ! empty( $block['attrs']['anchor'] ) ? $block['attrs']['anchor'] : sanitize_title( $text );
+						$anchor     = ! empty( $attrs['anchor'] ) ? $attrs['anchor'] : sanitize_title( $text );
 						$headings[] = array(
 							'label'  => $text,
 							'anchor' => $anchor,
+							'level'  => $level,
+							'hidden' => $hidden,
 						);
 					}
 				}
@@ -1688,6 +2060,69 @@ class Print_Engine {
 				$this->find_headings_in_blocks( $block['innerBlocks'], $headings );
 			}
 		}
+	}
+
+	/**
+	 * Nest H3 headings under the preceding H2 for an article TOC.
+	 *
+	 * @param \WP_Post $post Post.
+	 * @return array<int, array{label:string,href:string,children?:array}>
+	 */
+	private function extract_nested_headings_from_content( $post ): array {
+		$flat = array();
+		$this->find_headings_in_blocks( parse_blocks( (string) $post->post_content ), $flat );
+		$items   = array();
+		$current = null;
+		foreach ( $flat as $heading ) {
+			$is_hidden = ! empty( $heading['hidden'] );
+			$entry     = array(
+				'label' => $heading['label'],
+				'href'  => '#' . ltrim( $heading['anchor'], '#' ),
+			);
+			if ( 2 === (int) $heading['level'] ) {
+				if ( null !== $current ) {
+					$items[] = $current;
+				}
+				if ( $is_hidden ) {
+					$current = null;
+					continue;
+				}
+				$entry['children'] = array();
+				$current           = $entry;
+				continue;
+			}
+			if ( null !== $current ) {
+				$current['children'][] = $entry;
+			} else {
+				$items[] = $entry;
+			}
+		}
+		if ( null !== $current ) {
+			$items[] = $current;
+		}
+		return $items;
+	}
+
+	/**
+	 * H3 headings in a chapter, for nesting under the chapter title.
+	 *
+	 * @param \WP_Post $post Chapter post.
+	 * @return array<int, array{label:string,href:string}>
+	 */
+	private function extract_h3_headings_from_content( $post ): array {
+		$flat = array();
+		$this->find_headings_in_blocks( parse_blocks( (string) $post->post_content ), $flat );
+		$children = array();
+		foreach ( $flat as $heading ) {
+			if ( 3 !== (int) $heading['level'] ) {
+				continue;
+			}
+			$children[] = array(
+				'label' => $heading['label'],
+				'href'  => '#' . ltrim( $heading['anchor'], '#' ),
+			);
+		}
+		return $children;
 	}
 
 	/**
@@ -1740,6 +2175,7 @@ class Print_Engine {
 							'label'     => get_the_title( $chapter_post ),
 							'href'      => '#chapter-' . $chapter_post->ID,
 							'is_indent' => '' !== $part_label,
+							'children'  => $this->extract_h3_headings_from_content( $chapter_post ),
 						);
 					}
 				}
@@ -1748,8 +2184,9 @@ class Print_Engine {
 						continue;
 					}
 					$items[] = array(
-						'label' => get_the_title( $chapter_post ),
-						'href'  => '#chapter-' . $chapter_post->ID,
+						'label'    => get_the_title( $chapter_post ),
+						'href'     => '#chapter-' . $chapter_post->ID,
+						'children' => $this->extract_h3_headings_from_content( $chapter_post ),
 					);
 				}
 				return $items;
@@ -1757,21 +2194,15 @@ class Print_Engine {
 
 			foreach ( $published as $chapter_post ) {
 				$items[] = array(
-					'label' => get_the_title( $chapter_post ),
-					'href'  => '#chapter-' . $chapter_post->ID,
+					'label'    => get_the_title( $chapter_post ),
+					'href'     => '#chapter-' . $chapter_post->ID,
+					'children' => $this->extract_h3_headings_from_content( $chapter_post ),
 				);
 			}
 			return $items;
 		}
 
-		foreach ( $this->extract_headings_from_content( $post ) as $heading ) {
-			$items[] = array(
-				'label' => $heading['label'],
-				'href'  => '#' . ltrim( $heading['anchor'], '#' ),
-			);
-		}
-
-		return $items;
+		return $this->extract_nested_headings_from_content( $post );
 	}
 
 	/**
@@ -1808,6 +2239,12 @@ class Print_Engine {
 				'href'  => '#print-engine-about-research',
 			);
 		}
+		if ( ! empty( $this->glossary_chunks ) ) {
+			$front_matter[] = array(
+				'label' => $this->glossary_chunks[0]['title'],
+				'href'  => '#print-engine-glossary',
+			);
+		}
 		$items = array_merge( $front_matter, $items );
 
 		ob_start();
@@ -1832,6 +2269,19 @@ class Print_Engine {
 								<span class="print-engine-toc__leader" aria-hidden="true"></span>
 								<span class="print-engine-toc__page"></span>
 							</a>
+							<?php if ( ! empty( $item['children'] ) && is_array( $item['children'] ) ) : ?>
+								<ul class="print-engine-toc__sublist">
+									<?php foreach ( $item['children'] as $child ) : ?>
+										<li class="print-engine-toc__item print-engine-toc__item--h3">
+											<a class="print-engine-toc__link print-engine-toc__link--h3" href="<?php echo esc_url( $child['href'] ); ?>">
+												<span class="print-engine-toc__label"><?php echo esc_html( $child['label'] ); ?></span>
+												<span class="print-engine-toc__leader" aria-hidden="true"></span>
+												<span class="print-engine-toc__page"></span>
+											</a>
+										</li>
+									<?php endforeach; ?>
+								</ul>
+							<?php endif; ?>
 						</li>
 					<?php endforeach; ?>
 				</ul>
@@ -1893,6 +2343,8 @@ class Print_Engine {
 		$content = $this->hoist_lead_floated_chart( apply_filters( 'the_content', $raw ) );
 		$content = $this->strip_orphan_closing_divs( $content );
 		$content = $this->upgrade_print_sized_images( $content );
+		$content = $this->expand_print_details( $content );
+		$content = $this->reflow_print_charts( $content );
 
 		ob_start();
 		?>
@@ -1942,12 +2394,28 @@ class Print_Engine {
 	 * @return string The chapter content HTML.
 	 */
 	private function render_chapter_content( $chapter_post, $prepared_content = null, $cover_title = '' ) {
-		$title       = get_the_title( $chapter_post );
-		$subtitle    = $this->get_cover_subtitle( $chapter_post );
-		$raw         = null !== $prepared_content ? $prepared_content : $chapter_post->post_content;
-		$content     = $this->hoist_lead_floated_chart( apply_filters( 'the_content', $raw ) );
+		$title           = get_the_title( $chapter_post );
+		$subtitle        = $this->get_cover_subtitle( $chapter_post );
+		$raw             = null !== $prepared_content ? $prepared_content : $chapter_post->post_content;
+		$previous_post   = isset( $GLOBALS['post'] ) && $GLOBALS['post'] instanceof \WP_Post
+			? $GLOBALS['post']
+			: null;
+		$GLOBALS['post'] = $chapter_post; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
+		setup_postdata( $chapter_post );
+		try {
+			$content = $this->hoist_lead_floated_chart( apply_filters( 'the_content', $raw ) );
+		} finally {
+			if ( $previous_post instanceof \WP_Post ) {
+				$GLOBALS['post'] = $previous_post; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
+				setup_postdata( $previous_post );
+			} else {
+				wp_reset_postdata();
+			}
+		}
 		$content     = $this->strip_orphan_closing_divs( $content );
 		$content     = $this->upgrade_print_sized_images( $content );
+		$content     = $this->expand_print_details( $content );
+		$content     = $this->reflow_print_charts( $content );
 		$is_overview = '' !== $cover_title && $this->titles_match( $title, $cover_title );
 
 		ob_start();

@@ -16,6 +16,8 @@ import { Previewer } from 'pagedjs';
  * @see https://www.npmjs.com/package/@wordpress/scripts#using-css
  */
 import './print.scss';
+import { reflowPrintCharts } from './chart-reflow';
+import { preparePrintLayout } from './print-layout';
 
 /**
  * Remove `@media print { ... }` blocks with brace-balanced matching.
@@ -264,8 +266,9 @@ async function preloadContentImages(html) {
 }
 
 /**
- * Prepare content for Paged.js: clamp print-chart figures that can exceed the
- * page box. Do not rewrite general image alignment — that belongs to block CSS.
+ * Prepare content for Paged.js: reflow print charts, then clamp figures that
+ * can exceed the page box. Do not rewrite general image alignment — that
+ * belongs to block CSS.
  *
  * Paged.js silently stops pagination when a single unbreakable element is
  * taller than the page content area (GitHub pagedjs/pagedjs#274).
@@ -277,7 +280,11 @@ function prepareContentForPagination(html) {
 	const template = document.createElement('template');
 	template.innerHTML = html;
 
+	reflowPrintCharts(template.content);
+
 	const pageContentMax = '7.5in';
+
+	preparePrintLayout(template.content);
 
 	template.content.querySelectorAll('.print-engine-chart').forEach((el) => {
 		el.style.setProperty('max-height', pageContentMax, 'important');

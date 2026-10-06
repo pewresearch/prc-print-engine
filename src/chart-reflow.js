@@ -9,6 +9,45 @@ const SIZED_IMAGE_CLASSES = [
 	'size-640-wide',
 ];
 
+const STACK_WIDTH = 640;
+
+// The article title header counts as a heading, not body copy.
+export const PRINT_HEADING_SELECTOR =
+	'h1, h2, h3, h4, h5, h6, .print-engine-body-header';
+
+/**
+ * Producer-set display width of a resized chart figure, in px.
+ *
+ * The editor resize handle writes `width:Npx` on the img and `is-resized` on
+ * the figure. PHP copies it to `data-print-width`; the inline style is the
+ * fallback for markup that skipped the server pass. Only size-*-wide charts
+ * count: a resized photo keeps its own layout (alignment, aspect-ratio crop).
+ *
+ * @param {Element|null} figure Figure node.
+ * @return {number|null} Width in px, or null when the producer set none.
+ */
+export function getProducerImageWidth(figure) {
+	if (
+		!figure ||
+		figure.tagName !== 'FIGURE' ||
+		!SIZED_IMAGE_CLASSES.some((slug) => figure.classList.contains(slug))
+	) {
+		return null;
+	}
+	const pinned = parseInt(figure.getAttribute('data-print-width') || '', 10);
+	if (pinned > 0) {
+		return pinned;
+	}
+	if (!figure.classList.contains('is-resized')) {
+		return null;
+	}
+	const img = figure.querySelector('img');
+	const match = /(?:^|;)\s*width\s*:\s*(\d+(?:\.\d+)?)px/i.exec(
+		img?.getAttribute('style') || ''
+	);
+	return match ? Math.round(parseFloat(match[1])) : null;
+}
+
 /**
  * Whether a node is a print chart or sized Excel/Illustrator figure.
  *
@@ -71,10 +110,14 @@ function remapFloatedCharts(root) {
  * @return {boolean} True when the figure should not float.
  */
 function shouldStackFigure(figure) {
-	if (figure.classList.contains('size-640-wide')) {
+	if (figure.classList.contains('print-engine-chart--stack')) {
 		return true;
 	}
-	if (figure.classList.contains('print-engine-chart--stack')) {
+	const producerWidth = getProducerImageWidth(figure);
+	if (producerWidth) {
+		return producerWidth >= STACK_WIDTH;
+	}
+	if (figure.classList.contains('size-640-wide')) {
 		return true;
 	}
 	const style = figure.getAttribute('style') || '';

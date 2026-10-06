@@ -1414,6 +1414,84 @@ class Print_Engine {
 	}
 
 	/**
+	 * Pin producer resize widths on image figures for print.
+	 *
+	 * The editor resize handle writes `width:Npx` on the img and `is-resized`
+	 * on the figure, but the size-{N}-wide class rules would size the figure to
+	 * the class width (640 for most Excel charts). Copy the producer width to
+	 * `data-print-width`; view.js turns it into figure + image width rules. No
+	 * inline style: Paged.js treats a styled figure as undisplayed and will not
+	 * break before it.
+	 *
+	 * @param string $html Post content HTML after `the_content`.
+	 * @return string HTML with producer widths pinned on figures.
+	 */
+	private function pin_producer_image_widths( string $html ): string {
+		if ( '' === $html || false === strpos( $html, 'is-resized' ) ) {
+			return $html;
+		}
+
+		$widths    = array();
+		$scan      = new WP_HTML_Tag_Processor( $html );
+		$index     = -1;
+		$in_figure = false;
+		while ( $scan->next_tag( array( 'tag_closers' => 'visit' ) ) ) {
+			$tag = $scan->get_tag();
+			if ( 'FIGURE' === $tag ) {
+				if ( $scan->is_tag_closer() ) {
+					$in_figure = false;
+					continue;
+				}
+				++$index;
+				$in_figure = $scan->has_class( 'is-resized' )
+					&& null !== $this->print_sized_image_width_from_class( $scan->get_attribute( 'class' ) );
+				continue;
+			}
+			if ( 'IMG' !== $tag || ! $in_figure || $scan->is_tag_closer() ) {
+				continue;
+			}
+			$width = $this->producer_width_from_style( $scan->get_attribute( 'style' ) );
+			if ( null !== $width ) {
+				$widths[ $index ] = $width;
+			}
+			$in_figure = false;
+		}
+
+		if ( empty( $widths ) ) {
+			return $html;
+		}
+
+		$processor = new WP_HTML_Tag_Processor( $html );
+		$index     = -1;
+		while ( $processor->next_tag( 'FIGURE' ) ) {
+			++$index;
+			if ( ! isset( $widths[ $index ] ) ) {
+				continue;
+			}
+			$processor->set_attribute( 'data-print-width', (string) $widths[ $index ] );
+		}
+
+		return $processor->get_updated_html();
+	}
+
+	/**
+	 * Read a pixel `width` declaration from an inline style attribute.
+	 *
+	 * @param string|null|true $style Style attribute value.
+	 * @return int|null Width in px, or null when absent.
+	 */
+	private function producer_width_from_style( $style ): ?int {
+		if ( ! is_string( $style ) || '' === $style ) {
+			return null;
+		}
+		if ( ! preg_match( '/(?:^|;)\s*width\s*:\s*(\d+(?:\.\d+)?)px/i', $style, $match ) ) {
+			return null;
+		}
+		$width = (int) round( (float) $match[1] );
+		return $width > 0 ? $width : null;
+	}
+
+	/**
 	 * Keep remaining details boxes open in print (not collapsible).
 	 *
 	 * @param string $content Rendered body HTML.
@@ -1530,7 +1608,14 @@ class Print_Engine {
 	 * @return bool
 	 */
 	private function processor_figure_should_stack( WP_HTML_Tag_Processor $processor ): bool {
-		if ( $processor->has_class( 'size-640-wide' ) || $processor->has_class( 'print-engine-chart--stack' ) ) {
+		if ( $processor->has_class( 'print-engine-chart--stack' ) ) {
+			return true;
+		}
+		$producer_width = (int) $processor->get_attribute( 'data-print-width' );
+		if ( $producer_width > 0 ) {
+			return $producer_width >= self::PRINT_SIZED_IMAGE_WIDTHS['size-640-wide'];
+		}
+		if ( $processor->has_class( 'size-640-wide' ) ) {
 			return true;
 		}
 		$style = $processor->get_attribute( 'style' );
@@ -1924,17 +2009,26 @@ class Print_Engine {
 	/**
 	 * Store a glossary details box for the front-matter page.
 	 *
+	 * Report chapters each repeat the Key terms box with small wording edits,
+	 * so text dedupe alone lets several copies through. Keep the first box per
+	 * title; later ones are still stripped from the chapter body.
+	 *
 	 * @param array $block       Parsed details block.
 	 * @param array $seen_hashes Dedupe accumulator.
 	 */
 	private function collect_glossary_chunk( array $block, array &$seen_hashes ): void {
-		$html = $this->dedupe_extracted_html( $this->render_details_inner( $block ), $seen_hashes );
-		if ( '' === $html ) {
-			return;
-		}
 		$title = $this->get_details_summary_label( $block );
 		if ( '' === $title ) {
 			$title = 'Key terms';
+		}
+		foreach ( $this->glossary_chunks as $chunk ) {
+			if ( 0 === strcasecmp( $chunk['title'], $title ) ) {
+				return;
+			}
+		}
+		$html = $this->dedupe_extracted_html( $this->render_details_inner( $block ), $seen_hashes );
+		if ( '' === $html ) {
+			return;
 		}
 		$this->glossary_chunks[] = array(
 			'title' => $title,
@@ -2343,6 +2437,7 @@ class Print_Engine {
 		$content = $this->hoist_lead_floated_chart( apply_filters( 'the_content', $raw ) );
 		$content = $this->strip_orphan_closing_divs( $content );
 		$content = $this->upgrade_print_sized_images( $content );
+		$content = $this->pin_producer_image_widths( $content );
 		$content = $this->expand_print_details( $content );
 		$content = $this->reflow_print_charts( $content );
 
@@ -2414,6 +2509,7 @@ class Print_Engine {
 		}
 		$content     = $this->strip_orphan_closing_divs( $content );
 		$content     = $this->upgrade_print_sized_images( $content );
+		$content     = $this->pin_producer_image_widths( $content );
 		$content     = $this->expand_print_details( $content );
 		$content     = $this->reflow_print_charts( $content );
 		$is_overview = '' !== $cover_title && $this->titles_match( $title, $cover_title );

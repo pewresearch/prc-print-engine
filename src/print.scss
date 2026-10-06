@@ -9,7 +9,12 @@
 // =============================================================================
 $page-width: 8.5in;
 $page-height: 11in;
-$page-margin: 0.75in;
+// Text well: the @page margins. Running header/footer sit inside the margin
+// boxes, inset from the paper edge.
+$page-margin-block: 1.25in;
+$page-margin-inline: 0.9in;
+$page-margin: $page-margin-block $page-margin-inline;
+$running-inset: 0.5in;
 $font-family-sans: "franklin-gothic-urw", Verdana, Geneva, sans-serif;
 $font-family-serif: Georgia, "Times New Roman", Times, serif;
 // Abril Text lives in Typekit kit tic0xoy (same kit as the design system).
@@ -29,6 +34,8 @@ $color-text-muted: #595959;
 
 	@top-center {
 		content: counter(page);
+		vertical-align: top;
+		padding-top: $running-inset;
 		font-family: $font-family-sans;
 		font-size: 9pt;
 		font-weight: 700;
@@ -39,6 +46,8 @@ $color-text-muted: #595959;
 
 	@bottom-center {
 		content: "www.pewresearch.org";
+		vertical-align: bottom;
+		padding-bottom: $running-inset;
 		font-family: $font-family-sans;
 		font-size: 9pt;
 		color: $color-text-muted;
@@ -272,7 +281,7 @@ $color-text-muted: #595959;
 	justify-content: space-between;
 	// Avoid a page-tall overflow:hidden box — that is a known Paged.js
 	// infinite-loop guard trigger that silently stops pagination.
-	min-height: calc(#{$page-height} - (#{$page-margin} * 2) - 0.25in);
+	min-height: calc(#{$page-height} - (#{$page-margin-block} * 2) - 0.25in);
 	overflow: visible;
 
 	&__header {
@@ -1010,6 +1019,7 @@ $color-text-muted: #595959;
 	}
 
 	figure.print-engine-chart.alignleft,
+	figure.wp-block-image[data-print-width].alignleft,
 	figure.wp-block-image.size-200-wide.alignleft,
 	figure.wp-block-image.size-310-wide.alignleft,
 	figure.wp-block-image.size-420-wide.alignleft {
@@ -1020,13 +1030,15 @@ $color-text-muted: #595959;
 	}
 
 	figure.print-engine-chart.alignright,
+	figure.wp-block-image[data-print-width].alignright,
 	figure.wp-block-image.size-200-wide.alignright,
 	figure.wp-block-image.size-310-wide.alignright,
 	figure.wp-block-image.size-420-wide.alignright {
 		clear: both;
 	}
 
-	figure.wp-block-image.size-640-wide,
+	// A producer-resized 640 chart (data-print-width < 640) keeps its float.
+	figure.wp-block-image.size-640-wide:not([data-print-width]),
 	figure.print-engine-chart--stack {
 		float: none !important;
 		display: block !important;
@@ -1044,7 +1056,9 @@ $color-text-muted: #595959;
 	@each $px in (200, 310, 420, 640) {
 		.wp-block-image.size-#{$px}-wide {
 			max-width: #{$px}px !important;
-			width: #{$px}px;
+			// Inside a padded box (callout group) the 6.7in well leaves less
+			// than 640px; never overhang the container.
+			width: min(#{$px}px, 100%);
 
 			img {
 				max-width: 100% !important;
@@ -1070,6 +1084,103 @@ $color-text-muted: #595959;
 				height: auto;
 			}
 		}
+	}
+
+	// Inline `object-fit: cover` crops a chart once its box is capped to 7.5in.
+	@each $px in (200, 310, 420, 640) {
+		.wp-block-image.size-#{$px}-wide img {
+			object-fit: fill !important;
+		}
+	}
+
+	.wp-block-image[data-print-width] img {
+		object-fit: fill !important;
+	}
+
+	figure.wp-block-image[data-print-width].aligncenter {
+		break-inside: auto;
+		page-break-inside: auto;
+	}
+
+	// Float guard last resort (float-guard.js): a tall chart that cannot sit
+	// beside its lead on an empty page keeps its right edge but stops floating.
+	figure.print-engine-figure--unfloated {
+		float: none !important;
+		clear: both !important;
+		margin-left: auto !important;
+		margin-right: 0 !important;
+	}
+}
+
+// Viewport-height covers (min-height: 100vh) are taller than the text well in
+// a 1080px-tall headless renderer; Paged.js repeats them on every page.
+.print-engine-pdf-view .wp-block-cover {
+	min-height: 0 !important;
+}
+
+// =============================================================================
+// Carousel quotes — every slide, stacked in DOM order, without controls
+// =============================================================================
+.print-engine-pdf-view .wp-block-prc-block-carousel-controller {
+	display: block !important;
+	min-height: 0 !important;
+	height: auto !important;
+
+	.prc-block-carousel-controller__track,
+	.prc-block-carousel-controller__track__inner {
+		display: block !important;
+		width: auto !important;
+		height: auto !important;
+		overflow: visible !important;
+		transform: none !important;
+		perspective: none !important;
+	}
+
+	.wp-block-prc-block-carousel-slide {
+		position: static !important;
+		display: block !important;
+		width: auto !important;
+		max-width: none !important;
+		min-width: 0 !important;
+		height: auto !important;
+		margin: 0 0 1rem !important;
+		transform: none !important;
+		opacity: 1 !important;
+		visibility: visible !important;
+		break-inside: avoid;
+		page-break-inside: avoid;
+
+		p {
+			padding-left: 2rem;
+			padding-right: 2rem;
+		}
+	}
+
+	.prc-block-carousel-controller__arrow,
+	.prc-block-carousel-controller__dots,
+	.prc-block-carousel-controller__dot,
+	.prc-block-carousel-controller__counter,
+	.prc-block-carousel-controller__controls,
+	.prc-block-carousel-controller__play,
+	.prc-block-carousel-controller__insert-block {
+		display: none !important;
+	}
+}
+
+// =============================================================================
+// Expanded details — let open boxes split across pages like body copy
+// =============================================================================
+.print-engine-pdf-view details[open] {
+	display: block;
+	height: auto !important;
+	max-height: none !important;
+	overflow: visible !important;
+	break-inside: auto;
+	page-break-inside: auto;
+
+	> summary {
+		break-after: avoid;
+		page-break-after: avoid;
 	}
 }
 
@@ -1139,9 +1250,11 @@ $color-text-muted: #595959;
 		overflow-wrap: anywhere;
 	}
 
+	// Longhand top margin: float rules set only left/right/bottom, so they
+	// cannot zero it. Lead charts (hoisted to the top) reset it to 0.
 	.print-engine-chart {
 		page-break-inside: auto;
-		margin: 1.25rem 0;
+		margin: 1.5em 0 1.25rem;
 		max-height: 7.5in;
 
 		img {
@@ -1150,5 +1263,11 @@ $color-text-muted: #595959;
 			max-height: 7.5in;
 			height: auto;
 		}
+	}
+
+	// Set by page-top-figures.js on a chart that comes before the first
+	// paragraph on its page.
+	figure.print-engine-figure--page-top {
+		margin-top: 0;
 	}
 }

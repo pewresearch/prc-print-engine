@@ -17,7 +17,14 @@ import { Previewer } from 'pagedjs';
  */
 import './print.scss';
 import { reflowPrintCharts } from './chart-reflow';
-import { preparePrintLayout } from './print-layout';
+import { registerFloatGuard } from './float-guard';
+import { registerPageTopFigures } from './page-top-figures';
+import {
+	fitTallSvgs,
+	getPrintImageCss,
+	getPrintImageWidth,
+	preparePrintLayout,
+} from './print-layout';
 
 /**
  * Remove `@media print { ... }` blocks with brace-balanced matching.
@@ -214,6 +221,8 @@ async function preloadContentImages(html) {
 			return;
 		}
 		const sizedWidth = getPrintSizedImageWidth(img);
+		const figure = img.closest('figure.wp-block-image');
+		const printWidth = (figure && getPrintImageWidth(figure)) || sizedWidth;
 		let resolved = resolvePrintImageSrc(raw);
 		if (sizedWidth) {
 			resolved = stripPhotonSizeQuery(resolved);
@@ -223,9 +232,9 @@ async function preloadContentImages(html) {
 		img.removeAttribute('sizes');
 		img.setAttribute('loading', 'eager');
 		img.setAttribute('decoding', 'sync');
-		if (sizedWidth) {
-			img.style.width = `${sizedWidth}px`;
-			img.style.maxWidth = `${sizedWidth}px`;
+		if (printWidth) {
+			img.style.width = `${printWidth}px`;
+			img.style.maxWidth = `${printWidth}px`;
 		} else {
 			img.style.maxWidth = '100%';
 		}
@@ -240,6 +249,7 @@ async function preloadContentImages(html) {
 		)
 	);
 
+	const naturalSizes = new Map();
 	await Promise.all(
 		urls.map(
 			(src) =>
@@ -249,6 +259,12 @@ async function preloadContentImages(html) {
 					const done = () => {
 						if (!settled) {
 							settled = true;
+							if (img.naturalWidth && img.naturalHeight) {
+								naturalSizes.set(src, [
+									img.naturalWidth,
+									img.naturalHeight,
+								]);
+							}
 							resolve();
 						}
 					};
@@ -262,6 +278,21 @@ async function preloadContentImages(html) {
 		)
 	);
 
+	// Paged.js can measure a page before a cloned img decodes; width/height
+	// attributes give the box its aspect ratio up front so floats measure true.
+	template.content.querySelectorAll('img').forEach((img) => {
+		const size = naturalSizes.get(img.getAttribute('src') || '');
+		if (!size) {
+			return;
+		}
+		img.setAttribute('data-natural-width', String(size[0]));
+		img.setAttribute('data-natural-height', String(size[1]));
+		if (!img.hasAttribute('width') && !img.hasAttribute('height')) {
+			img.setAttribute('width', String(size[0]));
+			img.setAttribute('height', String(size[1]));
+		}
+	});
+
 	return template.innerHTML;
 }
 
@@ -274,7 +305,7 @@ async function preloadContentImages(html) {
  * taller than the page content area (GitHub pagedjs/pagedjs#274).
  *
  * @param {string} html Content HTML.
- * @return {string} Prepared HTML.
+ * @return {{html: string, imageCss: string}} Prepared HTML and image width rules.
  */
 function prepareContentForPagination(html) {
 	const template = document.createElement('template');
@@ -298,9 +329,16 @@ function prepareContentForPagination(html) {
 			img.style.setProperty('max-height', pageContentMax, 'important');
 			img.style.setProperty('height', 'auto', 'important');
 			img.style.setProperty('max-width', '100%', 'important');
+			// The preload width attribute would fix the width while
+			// max-height caps the height, squashing the chart; auto keeps
+			// the ratio under both limits.
+			img.style.setProperty('width', 'auto', 'important');
 		});
 
-	return template.innerHTML;
+	return {
+		html: template.innerHTML,
+		imageCss: getPrintImageCss(template.content),
+	};
 }
 
 /**
@@ -515,6 +553,7 @@ async function runPagedPreview() {
 
 	// Repair parse damage from orphan </div>s before reading innerHTML.
 	reparentEscapedChapters(contentEl);
+	fitTallSvgs(contentEl);
 
 	// Strip hide-on-print nodes before pagination.
 	contentEl
@@ -528,16 +567,21 @@ async function runPagedPreview() {
 		});
 
 	setToolbarReady(false);
-	const contentHtml = prepareContentForPagination(
+	const { html: contentHtml, imageCss } = prepareContentForPagination(
 		await preloadContentImages(sanitizeContentHtml(contentEl.innerHTML))
 	);
 	const stylesheets = getPrintStylesheets();
+	if (imageCss) {
+		stylesheets.push({ 'prc-print-engine-image-widths': imageCss });
+	}
 
 	contentEl.innerHTML = '';
 	contentEl.classList.add('pagedjs-ready');
 
 	setToolbarReady(false);
 	const stopWatch = watchPageProgress(contentEl);
+	registerFloatGuard();
+	registerPageTopFigures();
 	const previewer = new Previewer();
 
 	try {

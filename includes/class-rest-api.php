@@ -22,6 +22,8 @@ class Rest_Api {
 	private $pdf_export;
 
 	/**
+	 * Register hooks.
+	 *
 	 * @param Loader     $loader     Hook loader.
 	 * @param Pdf_Export $pdf_export PDF export service.
 	 */
@@ -31,6 +33,8 @@ class Rest_Api {
 	}
 
 	/**
+	 * Register REST routes.
+	 *
 	 * @hook rest_api_init
 	 */
 	public function register_routes(): void {
@@ -74,9 +78,7 @@ class Rest_Api {
 			array(
 				'methods'             => \WP_REST_Server::CREATABLE,
 				'callback'            => array( $this, 'handle_screenshot' ),
-				'permission_callback' => static function () {
-					return current_user_can( 'edit_posts' );
-				},
+				'permission_callback' => array( $this, 'can_request_screenshot' ),
 				'args'                => array(
 					'url'            => array(
 						'required'          => true,
@@ -113,6 +115,96 @@ class Rest_Api {
 	public function can_edit_post( \WP_REST_Request $request ): bool {
 		$post_id = (int) $request->get_param( 'id' );
 		return $post_id > 0 && current_user_can( 'edit_post', $post_id );
+	}
+
+	/**
+	 * Permission: screenshots need `edit_posts`; attaching the PNG also needs
+	 * `upload_files` and `edit_post` on attachToPostId.
+	 *
+	 * Runs before the handler so a denied attach never bills a Firebase render.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return bool|\WP_Error
+	 */
+	public function can_request_screenshot( \WP_REST_Request $request ) {
+		if ( ! current_user_can( 'edit_posts' ) ) {
+			return false;
+		}
+
+		$attach = (int) $request->get_param( 'attachToPostId' );
+		if ( $attach > 0 && ( ! current_user_can( 'upload_files' ) || ! current_user_can( 'edit_post', $attach ) ) ) {
+			return new \WP_Error(
+				'rest_forbidden',
+				__( 'You cannot attach a screenshot to this post.', 'prc-print-engine' ),
+				array( 'status' => rest_authorization_required_code() )
+			);
+		}
+
+		return true;
+	}
+
+	/**
+	 * Hosts the screenshot endpoint may send to the render service.
+	 *
+	 * Defaults to this site, the network main site, the assets CDN, and the
+	 * alpha, beta, and canary environments.
+	 *
+	 * @return string[] Lowercase host names.
+	 */
+	public static function get_screenshot_allowed_hosts(): array {
+		$hosts = array(
+			wp_parse_url( home_url(), PHP_URL_HOST ),
+			wp_parse_url( site_url(), PHP_URL_HOST ),
+			wp_parse_url( network_home_url(), PHP_URL_HOST ),
+		);
+
+		// phpcs:ignore Squiz.Commenting.InlineComment.InvalidEndChar
+		$root_domain = 'pewresearch.org'; // pragma: allowlist secret
+		foreach ( array( 'assets', 'alpha', 'beta', 'canary' ) as $subdomain ) {
+			$hosts[] = $subdomain . '.' . $root_domain;
+		}
+
+		/**
+		 * Filters the hosts the print-engine screenshot endpoint may render.
+		 *
+		 * @param string[] $hosts Host names.
+		 */
+		$hosts = (array) apply_filters( 'prc_print_engine_screenshot_allowed_hosts', $hosts );
+
+		return array_values(
+			array_unique(
+				array_map( 'strtolower', array_filter( $hosts, 'is_string' ) )
+			)
+		);
+	}
+
+	/**
+	 * Whether a URL may be sent to the screenshot render service.
+	 *
+	 * Requires https, no credentials, the default port, and an allowlisted host.
+	 *
+	 * @param string $url Absolute URL.
+	 * @return bool
+	 */
+	public static function is_allowed_screenshot_url( string $url ): bool {
+		$parts = wp_parse_url( $url );
+		if ( ! is_array( $parts ) || empty( $parts['host'] ) ) {
+			return false;
+		}
+
+		if ( 'https' !== strtolower( $parts['scheme'] ?? '' ) ) {
+			return false;
+		}
+
+		if ( isset( $parts['user'] ) || isset( $parts['pass'] ) ) {
+			return false;
+		}
+
+		if ( isset( $parts['port'] ) && 443 !== (int) $parts['port'] ) {
+			return false;
+		}
+
+		return in_array( strtolower( $parts['host'] ), self::get_screenshot_allowed_hosts(), true );
 	}
 
 	/**
@@ -189,11 +281,25 @@ class Rest_Api {
 	 */
 	public function handle_get_pdf_status( \WP_REST_Request $request ) {
 		$post_id = (int) $request->get_param( 'id' );
-		if ( ! get_post( $post_id ) ) {
+		$post    = get_post( $post_id );
+		if ( ! $post ) {
 			return new \WP_Error( 'not_found', __( 'Post not found.', 'prc-print-engine' ), array( 'status' => 404 ) );
 		}
 
-		return new \WP_REST_Response( Pdf_Export::get_status( $post_id ), 200 );
+		$owner = Pdf_Export::resolve_pdf_owner_post( $post );
+		if ( ! $owner ) {
+			return new \WP_Error( 'not_found', __( 'Post not found.', 'prc-print-engine' ), array( 'status' => 404 ) );
+		}
+
+		if ( ! current_user_can( 'edit_post', (int) $owner->ID ) ) {
+			return new \WP_Error(
+				'forbidden',
+				__( 'You cannot view the PDF status for this post.', 'prc-print-engine' ),
+				array( 'status' => 403 )
+			);
+		}
+
+		return new \WP_REST_Response( Pdf_Export::get_status( (int) $owner->ID ), 200 );
 	}
 
 	/**
@@ -216,6 +322,14 @@ class Rest_Api {
 			);
 		}
 
+		if ( ! self::is_allowed_screenshot_url( $url ) ) {
+			return new \WP_Error(
+				'url_not_allowed',
+				__( 'url must be an https URL on this site or the assets CDN.', 'prc-print-engine' ),
+				array( 'status' => 400 )
+			);
+		}
+
 		$png = $this->pdf_export->request_screenshot_bytes( $url, $selector, $wait_ms );
 		if ( is_wp_error( $png ) ) {
 			return $png;
@@ -227,14 +341,6 @@ class Rest_Api {
 		);
 
 		if ( $attach > 0 ) {
-			if ( ! current_user_can( 'edit_post', $attach ) ) {
-				return new \WP_Error(
-					'forbidden',
-					__( 'You cannot attach a screenshot to this post.', 'prc-print-engine' ),
-					array( 'status' => 403 )
-				);
-			}
-
 			$tmp_file = wp_tempnam( "print-engine-shot-{$attach}.png" );
 			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
 			file_put_contents( $tmp_file, $png );

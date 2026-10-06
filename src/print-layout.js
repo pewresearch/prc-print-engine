@@ -2,8 +2,20 @@
  * Print layout helpers: expand details, heading ids, page footnotes, sized images.
  */
 
-const SIZED_IMAGE_CLASS = /(?:^|\s)size-(?:200|310|420|640)-wide(?:\s|$)/;
+/**
+ * Internal dependencies
+ */
+import { getProducerImageWidth } from './chart-reflow';
+
+const SIZED_IMAGE_WIDTHS = {
+	'size-200-wide': 200,
+	'size-310-wide': 310,
+	'size-420-wide': 420,
+	'size-640-wide': 640,
+};
 const PAGE_CONTENT_MAX = '7.5in';
+// 7.5in at 96 CSS px per inch.
+const PAGE_CONTENT_MAX_PX = 720;
 const originalHeadingIds = new WeakMap();
 
 /**
@@ -17,8 +29,41 @@ export function preparePrintLayout(root) {
 	}
 	expandDetails(root);
 	ensureHeadingIds(root);
+	ensureSelectorSafeTocTargets(root);
 	reflowFootnotes(root);
 	clampSizedImages(root);
+}
+
+/**
+ * Scale script-drawn SVG charts that are taller than the page content area.
+ *
+ * Feature scripts size their SVG to the viewport (1080px in the Firebase
+ * renderer), which is taller than the 8.5in text well. Paged.js cannot split
+ * an SVG and loops on it ("Layout repeated"). Add a viewBox and shrink the
+ * width/height attributes so the drawing scales to 7.5in. Call on the live
+ * DOM: the size only exists after the feature script ran.
+ *
+ * @param {Element} contentEl Print content mount.
+ */
+export function fitTallSvgs(contentEl) {
+	contentEl.querySelectorAll('svg').forEach((svg) => {
+		if (svg.parentElement?.closest('svg')) {
+			return;
+		}
+		const { width, height } = svg.getBoundingClientRect();
+		if (height <= PAGE_CONTENT_MAX_PX || width <= 0) {
+			return;
+		}
+		if (!svg.hasAttribute('viewBox')) {
+			svg.setAttribute(
+				'viewBox',
+				`0 0 ${Math.round(width)} ${Math.round(height)}`
+			);
+		}
+		const scale = PAGE_CONTENT_MAX_PX / height;
+		svg.setAttribute('width', String(Math.floor(width * scale)));
+		svg.setAttribute('height', String(PAGE_CONTENT_MAX_PX));
+	});
 }
 
 /**
@@ -271,6 +316,55 @@ function assignTocHref(link, remaining) {
 }
 
 /**
+ * Rename TOC targets whose ids are not valid CSS id selectors.
+ *
+ * Paged.js resolves `target-counter(attr(href url))` with querySelector, so a
+ * heading anchor such as `2024-vote-choice` throws and aborts pagination.
+ *
+ * @param {DocumentFragment|Element} root Content root.
+ */
+function ensureSelectorSafeTocTargets(root) {
+	const used = new Set(
+		Array.from(root.querySelectorAll('[id]')).map((el) => el.id)
+	);
+	root.querySelectorAll('.print-engine-toc__link').forEach((link) => {
+		const href = link.getAttribute('href') || '';
+		if (!href.startsWith('#') || isSelectorSafeId(href.slice(1))) {
+			return;
+		}
+		const fragment = href.slice(1);
+		const target = Array.from(root.querySelectorAll('[id]')).find(
+			(el) => el.id === fragment
+		);
+		let id = `h-${slugify(fragment) || 'target'}`;
+		let n = 2;
+		while (used.has(id)) {
+			id = `h-${slugify(fragment) || 'target'}-${n}`;
+			n += 1;
+		}
+		used.add(id);
+		if (target) {
+			target.id = id;
+		}
+		root.querySelectorAll('a[href]').forEach((anchor) => {
+			if (anchor.getAttribute('href') === href) {
+				anchor.setAttribute('href', `#${id}`);
+			}
+		});
+	});
+}
+
+/**
+ * Whether `#id` parses as a CSS id selector without escaping.
+ *
+ * @param {string} id Element id.
+ * @return {boolean} True when the id is a valid CSS identifier.
+ */
+function isSelectorSafeId(id) {
+	return /^(?:-?[A-Za-z_\u00a0-\uffff]|--)[\w\u00a0-\uffff-]*$/.test(id);
+}
+
+/**
  * @param {string} text Heading text.
  * @return {string} URL fragment.
  */
@@ -344,28 +438,106 @@ function reflowFootnotes(root) {
 }
 
 /**
- * Tall sized Excel/Illustrator figures must be allowed to break; otherwise
- * Paged.js drops them (pagedjs#274).
+ * Print display width of a sized or producer-resized image figure.
+ *
+ * @param {Element} figure Figure node.
+ * @return {number|null} Width in px, or null when neither is set.
+ */
+export function getPrintImageWidth(figure) {
+	return getProducerImageWidth(figure) || getSizeClassWidth(figure);
+}
+
+/**
+ * Width from a size-{200,310,420,640}-wide class.
+ *
+ * @param {Element} figure Figure node.
+ * @return {number|null} Width in px, or null without a size class.
+ */
+function getSizeClassWidth(figure) {
+	for (const [slug, width] of Object.entries(SIZED_IMAGE_WIDTHS)) {
+		if (figure.classList.contains(slug)) {
+			return width;
+		}
+	}
+	return null;
+}
+
+/**
+ * Pin sized/resized figures to their print width, and cap tall ones.
+ *
+ * A figure taller than 7.5in shrinks proportionally (width follows height) so
+ * the chart keeps its aspect ratio. A width that differs from the size class
+ * lands in `data-print-pin`, and getPrintImageCss() turns it into rules:
+ * Paged.js marks any element with an inline style attribute as undisplayed
+ * and will not break before it, which would stop the float guard from moving
+ * the figure. Figures at their class width keep the print.scss class rules.
  *
  * @param {DocumentFragment|Element} root Content root.
  */
 function clampSizedImages(root) {
 	root.querySelectorAll('figure.wp-block-image').forEach((figure) => {
-		const className =
-			typeof figure.className === 'string' ? figure.className : '';
-		if (!SIZED_IMAGE_CLASS.test(className)) {
+		let width = getPrintImageWidth(figure);
+		const img = figure.querySelector('img');
+		if (!width || !img) {
 			return;
 		}
-		// Floated sized charts must stay unbreakable. Only centered ones
-		// are allowed to split so Paged.js does not drop overflow (pagedjs#274).
-		if (!/(?:^|\s)aligncenter(?:\s|$)/.test(className)) {
-			return;
+
+		const ratio = getImageAspectRatio(img);
+		if (ratio && width * ratio > PAGE_CONTENT_MAX_PX) {
+			width = Math.floor(PAGE_CONTENT_MAX_PX / ratio);
+			figure.classList.add('print-engine-image--capped');
 		}
-		figure.style.setProperty('break-inside', 'auto', 'important');
-		figure.style.setProperty('page-break-inside', 'auto', 'important');
-		figure.querySelectorAll('img').forEach((img) => {
-			img.style.setProperty('max-height', PAGE_CONTENT_MAX, 'important');
-			img.style.setProperty('height', 'auto', 'important');
-		});
+
+		if (width !== getSizeClassWidth(figure)) {
+			figure.setAttribute('data-print-pin', String(width));
+		}
 	});
+}
+
+/**
+ * Stylesheet that pins each `data-print-pin` on its figure and image.
+ *
+ * @param {DocumentFragment|Element} root Prepared content root.
+ * @return {string} CSS text, empty when no figure is pinned.
+ */
+export function getPrintImageCss(root) {
+	const widths = new Set(
+		Array.from(
+			root.querySelectorAll('figure.wp-block-image[data-print-pin]')
+		).map((figure) => parseInt(figure.getAttribute('data-print-pin'), 10))
+	);
+	return Array.from(widths)
+		.filter((width) => width > 0)
+		.map((width) => {
+			const figure = `.print-engine-pdf-view figure.wp-block-image[data-print-pin="${width}"]`;
+			return (
+				`${figure}{width:min(${width}px,100%)!important;max-width:min(${width}px,100%)!important}` +
+				`${figure} img{width:${width}px!important;max-width:100%!important;height:auto!important;max-height:${PAGE_CONTENT_MAX}!important;object-fit:fill!important}`
+			);
+		})
+		.join('\n');
+}
+
+/**
+ * Height / width of an image from the preloaded file or its attributes.
+ *
+ * @param {HTMLImageElement} img Image node.
+ * @return {number|null} Aspect ratio, or null when unknown.
+ */
+function getImageAspectRatio(img) {
+	const pairs = [
+		[
+			img.getAttribute('data-natural-width'),
+			img.getAttribute('data-natural-height'),
+		],
+		[img.getAttribute('width'), img.getAttribute('height')],
+	];
+	for (const [w, h] of pairs) {
+		const width = parseFloat(w || '');
+		const height = parseFloat(h || '');
+		if (width > 0 && height > 0) {
+			return height / width;
+		}
+	}
+	return null;
 }

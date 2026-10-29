@@ -352,13 +352,18 @@ class Pdf_Export {
 		$response = wp_remote_post(
 			$endpoint,
 			array(
-				'timeout' => 300,
+				'timeout' => 300, // phpcs:ignore WordPressVIPMinimum.Performance.RemoteRequestTimeout.timeout_timeout -- Matches the generatePdf function's 300s timeoutSeconds.
 				'headers' => array(
 					'Authorization' => 'Bearer ' . $id_token,
 					'Content-Type'  => 'application/json',
 					'Accept'        => 'application/pdf',
 				),
-				'body'    => wp_json_encode( array( 'url' => $print_url ) ),
+				'body'    => wp_json_encode(
+					array(
+						'url'       => $print_url,
+						'basicAuth' => $this->gate_credentials( $print_url ),
+					)
+				),
 			)
 		);
 
@@ -412,7 +417,7 @@ class Pdf_Export {
 		$response = wp_remote_post(
 			$endpoint,
 			array(
-				'timeout' => 120,
+				'timeout' => 120, // phpcs:ignore WordPressVIPMinimum.Performance.RemoteRequestTimeout.timeout_timeout -- Matches the screenshotElement function's 120s timeoutSeconds.
 				'headers' => array(
 					'Authorization' => 'Bearer ' . $id_token,
 					'Content-Type'  => 'application/json',
@@ -420,9 +425,10 @@ class Pdf_Export {
 				),
 				'body'    => wp_json_encode(
 					array(
-						'url'      => $url,
-						'selector' => $selector,
-						'waitMs'   => $wait_ms,
+						'url'       => $url,
+						'selector'  => $selector,
+						'waitMs'    => $wait_ms,
+						'basicAuth' => $this->gate_credentials( $url ),
 					)
 				),
 			)
@@ -449,6 +455,17 @@ class Pdf_Export {
 		}
 
 		return $body;
+	}
+
+	/**
+	 * The VIP basic auth gate login for a page Firebase loads. Null except
+	 * for this non-production environment's own hosts.
+	 *
+	 * @param string $url Page URL.
+	 * @return array{login: string, password: string}|null
+	 */
+	protected function gate_credentials( string $url ): ?array {
+		return \PRC\Platform\Basic_Auth_Gate\credentials_for( $url );
 	}
 
 	/**

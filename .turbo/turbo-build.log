@@ -1,5 +1,5 @@
 
-> @prc/print-engine@1.0.1 build
+> @prc/print-engine@1.0.2 build
 > wp-scripts build --webpack-copy-php --source-path=src --output-path=build
 
 Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
@@ -50,4 +50,4 @@ Entrypoints:
 You can limit the size of your bundles by using import() or require.ensure to lazy load some parts of your application.
 For more info visit https://webpack.js.org/guides/code-splitting/[39m[22m
 
-webpack 5.106.2 compiled with [1m[33m3 warnings[39m[22m in 5172 ms
+webpack 5.106.2 compiled with [1m[33m3 warnings[39m[22m in 5036 ms

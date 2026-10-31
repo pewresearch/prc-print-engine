@@ -29,7 +29,7 @@ Guarded at call sites — plugin boots without them:
 
 ## Requires
 
-- `prc-scripts`
+- `prc-shared`
 
 ## Firebase render functions
 

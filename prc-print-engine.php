@@ -19,7 +19,7 @@
  * License:           GPL-2.0+
  * License URI:       http://www.gnu.org/licenses/gpl-2.0.txt
  * Text Domain:       prc-print-engine
- * Requires Plugins:  prc-scripts
+ * Requires Plugins:  prc-shared
  */
 
 namespace PRC\Platform\Print_Engine;

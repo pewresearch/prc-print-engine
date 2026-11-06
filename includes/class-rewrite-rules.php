@@ -182,6 +182,22 @@ class Rewrite_Rules {
 	}
 
 	/**
+	 * Whether a `?pdf=true` request renders the print document in place instead of redirecting.
+	 *
+	 * Two cases render in place:
+	 * - The post is not publicly viewable. It has a plain `?p=` permalink with no `/print` endpoint to redirect to.
+	 *   This reads the stored status: a signed draft render's global post is an in-request copy marked `publish`.
+	 * - The request carries a print ticket. The PDF service signs the URL while the post is a draft and can fetch it
+	 *   after publish. A redirect would drop the ticket, and the anonymous `/print` request would 404.
+	 *
+	 * @param \WP_Post $post Resolved print post.
+	 * @return bool
+	 */
+	public static function pdf_alias_serves_in_place( \WP_Post $post ): bool {
+		return ! is_post_publicly_viewable( $post->ID ) || Print_Access::request_has_print_ticket( $post );
+	}
+
+	/**
 	 * Redirect legacy ?pdf=true to /print when safe; otherwise serve print view.
 	 *
 	 * @return void
@@ -206,6 +222,10 @@ class Rewrite_Rules {
 
 		if ( ! Print_Access::request_may_access_print( $post ) ) {
 			return;
+		}
+
+		if ( self::pdf_alias_serves_in_place( $post ) ) {
+			Print_Engine::serve( $post );
 		}
 
 		$print_url = Print_Engine::get_print_url( $post );

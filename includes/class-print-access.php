@@ -15,44 +15,17 @@ namespace PRC\Platform\Print_Engine;
  *
  * Invariants:
  * - Browser access requires a WP authenticated session (is_user_logged_in).
- * - Machine access requires a valid ticket minted for the same post_id, unexpired.
+ * - Machine access requires a signed-fetch ticket minted for the same post_id with the `print` purpose.
  * - Tickets are only minted by trusted server code (PDF_Export); never from UI.
- * - Query-arg wire format is private to this class; callers pass whole URLs in/out.
  */
 final class Print_Access {
 
 	/**
-	 * Query arg carrying the HMAC payload.
+	 * Signed-fetch purpose for print-engine machine fetches.
 	 *
 	 * @var string
 	 */
-	public const MACHINE_QUERY_VAR = 'prc_print_machine';
-
-	/**
-	 * Unix expiry for the machine ticket.
-	 *
-	 * @var string
-	 */
-	public const MACHINE_EXPIRES_QUERY_VAR = 'prc_print_machine_expires';
-
-	/**
-	 * Default ticket lifetime for Firebase fetch + render headroom.
-	 *
-	 * @var int
-	 */
-	public const DEFAULT_TICKET_TTL_SECONDS = 900;
-
-	/**
-	 * Register machine query vars on the print-engine query_vars filter.
-	 *
-	 * @param string[] $qvars Existing query vars.
-	 * @return string[]
-	 */
-	public static function register_query_vars( array $qvars ): array {
-		$qvars[] = self::MACHINE_QUERY_VAR;
-		$qvars[] = self::MACHINE_EXPIRES_QUERY_VAR;
-		return $qvars;
-	}
+	public const SIGNED_FETCH_PURPOSE = 'print';
 
 	/**
 	 * Whether the current WP user may see print beta UI (materials, discovery).
@@ -66,7 +39,7 @@ final class Print_Access {
 	/**
 	 * Whether the current HTTP request may be served the print document for $post.
 	 *
-	 * True when either a logged-in WP user is present, or a valid machine-fetch
+	 * True when either a logged-in WP user is present, or a valid signed-fetch
 	 * ticket for $post->ID is present on the request.
 	 *
 	 * Does not re-check publish/password/caps — caller already ran can_serve_print_for_post.
@@ -79,79 +52,18 @@ final class Print_Access {
 			return true;
 		}
 
-		return self::machine_ticket_is_valid( (int) $post->ID );
+		return self::request_has_print_ticket( $post );
 	}
 
 	/**
-	 * Attach a short-lived machine-fetch ticket to an absolute /print URL.
+	 * Whether the current HTTP request carries a valid print ticket for $post.
 	 *
-	 * Used only by PDF_Export before handing the URL to Firebase generatePdf.
-	 * Ticket is bound to $post_id so it cannot authorize a different post's /print.
+	 * Ignores the logged-in session, so a browser visit never counts as a machine fetch.
 	 *
-	 * @param string $print_url Absolute print URL (may already have preview args).
-	 * @param int    $post_id   Owner post ID Firebase will fetch.
-	 * @param int    $ttl       Seconds until expiry.
-	 * @return string URL with ticket query args.
-	 */
-	public static function mint_machine_fetch_url( string $print_url, int $post_id, int $ttl = self::DEFAULT_TICKET_TTL_SECONDS ): string {
-		$expires = time() + $ttl;
-		$sig     = hash_hmac( 'sha256', $post_id . '|' . $expires, self::signing_key() );
-
-		return add_query_arg(
-			array(
-				self::MACHINE_QUERY_VAR         => $sig,
-				self::MACHINE_EXPIRES_QUERY_VAR => $expires,
-			),
-			$print_url
-		);
-	}
-
-	/**
-	 * Validate machine ticket on the current request for $post_id.
-	 *
-	 * @param int $post_id Resolved print post.
+	 * @param \WP_Post $post Resolved print post.
 	 * @return bool
 	 */
-	private static function machine_ticket_is_valid( int $post_id ): bool {
-		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- signed machine ticket, not a form nonce.
-		if ( ! isset( $_GET[ self::MACHINE_QUERY_VAR ], $_GET[ self::MACHINE_EXPIRES_QUERY_VAR ] ) ) {
-			return false;
-		}
-
-		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		$sig_raw = wp_unslash( $_GET[ self::MACHINE_QUERY_VAR ] );
-		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		$expires_raw = wp_unslash( $_GET[ self::MACHINE_EXPIRES_QUERY_VAR ] );
-
-		if ( ! is_string( $sig_raw ) ) {
-			return false;
-		}
-
-		$sig = sanitize_text_field( $sig_raw );
-		if ( '' === $sig ) {
-			return false;
-		}
-
-		if ( ! is_scalar( $expires_raw ) || ! is_numeric( $expires_raw ) ) {
-			return false;
-		}
-
-		$expires = (int) $expires_raw;
-		if ( $expires < time() ) {
-			return false;
-		}
-
-		$expected = hash_hmac( 'sha256', $post_id . '|' . $expires, self::signing_key() );
-
-		return hash_equals( $expected, $sig );
-	}
-
-	/**
-	 * HMAC key material — WP auth salt; filterable for tests.
-	 *
-	 * @return string
-	 */
-	private static function signing_key(): string {
-		return (string) apply_filters( 'prc_print_engine_machine_fetch_key', wp_salt( 'auth' ) );
+	public static function request_has_print_ticket( \WP_Post $post ): bool {
+		return \PRC\Primitives\Signed_Fetch\request_authorizes( (int) $post->ID, self::SIGNED_FETCH_PURPOSE );
 	}
 }

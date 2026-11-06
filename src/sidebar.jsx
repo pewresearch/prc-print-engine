@@ -53,11 +53,12 @@ function getConfig() {
 }
 
 function PrintEngineSidebarPanel() {
-	const { postId, postType } = useSelect((select) => {
+	const { postId, postType, isPublished } = useSelect((select) => {
 		const editor = select(editorStore);
 		return {
 			postId: editor?.getCurrentPostId?.() || 0,
 			postType: editor?.getCurrentPostType?.() || '',
+			isPublished: Boolean(editor?.isCurrentPostPublished?.()),
 		};
 	}, []);
 	const { createSuccessNotice, createErrorNotice } =
@@ -144,12 +145,21 @@ function PrintEngineSidebarPanel() {
 			)}
 			{configured && (
 				<>
-					<p>
-						{__(
-							'Generate a stored PDF from the /print layout. Publishing or updating this post also queues a fresh PDF automatically.',
-							'prc-print-engine'
-						)}
-					</p>
+					{isPublished ? (
+						<p>
+							{__(
+								'Generate a stored PDF from the /print layout. Publishing or updating this post also queues a fresh PDF automatically.',
+								'prc-print-engine'
+							)}
+						</p>
+					) : (
+						<p>
+							{__(
+								'This post is not published. A PDF generated now uses the last saved draft and is for review only. Publishing generates a fresh PDF automatically.',
+								'prc-print-engine'
+							)}
+						</p>
+					)}
 					{pdfUrl ? (
 						<p>
 							<strong>
@@ -181,6 +191,7 @@ function PrintEngineSidebarPanel() {
 						}}
 					>
 						<Button
+							__next40pxDefaultSize
 							variant="primary"
 							onClick={onGenerate}
 							disabled={pending || !postId || !postType}

@@ -21,6 +21,14 @@ class Pdf_Export {
 	public const META_GENERATED_AT  = '_print_engine_pdf_generated_at';
 
 	/**
+	 * Statuses an editor may generate a PDF for. Unpublished posts render
+	 * through a signed `print` ticket.
+	 *
+	 * @var string[]
+	 */
+	public const ON_DEMAND_STATUSES = array( 'publish', 'draft', 'pending', 'future' );
+
+	/**
 	 * Register hooks.
 	 *
 	 * @param Loader $loader Hook loader.
@@ -81,8 +89,10 @@ class Pdf_Export {
 	/**
 	 * Compute a content hash used to skip no-op regenerations.
 	 *
-	 * Includes published chapter bodies for report packages so parent-only
-	 * updates cannot skip regen when assembled /print HTML still changed.
+	 * Includes the chapter bodies the /print document assembles for report
+	 * packages so parent-only updates cannot skip regen when that HTML still
+	 * changed. Includes the status so publishing always replaces a PDF
+	 * rendered from a draft.
 	 *
 	 * @param \WP_Post $post Post object.
 	 * @return string
@@ -90,6 +100,7 @@ class Pdf_Export {
 	public function compute_content_hash( \WP_Post $post ): string {
 		$parts = array(
 			(string) $post->ID,
+			(string) $post->post_status,
 			(string) $post->post_modified_gmt,
 			(string) $post->post_content,
 		);
@@ -103,13 +114,14 @@ class Pdf_Export {
 		if ( function_exists( '\PRC\Platform\Report_Package\get_package_chapters' ) ) {
 			$chapters = \PRC\Platform\Report_Package\get_package_chapters( $post->ID );
 			if ( is_array( $chapters ) ) {
+				$statuses = Print_Engine::package_chapter_statuses( $post );
 				foreach ( $chapters as $chapter ) {
 					$chapter_id = isset( $chapter['id'] ) ? (int) $chapter['id'] : 0;
 					if ( ! $chapter_id || $chapter_id === (int) $post->ID ) {
 						continue;
 					}
 					$chapter_post = get_post( $chapter_id );
-					if ( ! $chapter_post || 'publish' !== $chapter_post->post_status ) {
+					if ( ! $chapter_post || ! in_array( $chapter_post->post_status, $statuses, true ) ) {
 						continue;
 					}
 					$parts[] = (string) $chapter_post->ID;
@@ -147,13 +159,26 @@ class Pdf_Export {
 	}
 
 	/**
-	 * Whether the post is eligible for automatic PDF generation.
+	 * Whether publish and update events regenerate this post's PDF.
 	 *
 	 * @param \WP_Post $post Post object.
 	 * @return bool
 	 */
-	public function can_generate_for_post( \WP_Post $post ): bool {
-		if ( 'publish' !== $post->post_status ) {
+	public function can_auto_generate_for_post( \WP_Post $post ): bool {
+		return 'publish' === $post->post_status && $this->can_generate_on_demand( $post );
+	}
+
+	/**
+	 * Whether an editor may generate this post's PDF now, including drafts.
+	 *
+	 * Does not call Print_Engine::can_serve_print_for_post(): the job runs as
+	 * user 0, and the signed ticket in generate_pdf() authorizes the render.
+	 *
+	 * @param \WP_Post $post Post object.
+	 * @return bool
+	 */
+	public function can_generate_on_demand( \WP_Post $post ): bool {
+		if ( ! in_array( $post->post_status, self::ON_DEMAND_STATUSES, true ) ) {
 			return false;
 		}
 
@@ -161,15 +186,37 @@ class Pdf_Export {
 			return false;
 		}
 
-		if ( ! post_type_supports( $post->post_type, 'prc-print-engine' ) ) {
-			return false;
+		return post_type_supports( $post->post_type, 'prc-print-engine' );
+	}
+
+	/**
+	 * URL the render service fetches, signed for the `print` purpose.
+	 *
+	 * Unpublished posts have plain `?p=` permalinks with no `/print` endpoint,
+	 * so they render through the `?pdf=true` alias instead.
+	 *
+	 * @param \WP_Post $post     Post object.
+	 * @param string   $base_url Optional public origin override.
+	 * @return string|null
+	 */
+	public static function get_render_url( \WP_Post $post, string $base_url = '' ): ?string {
+		if ( is_post_publicly_viewable( $post ) ) {
+			$url = Print_Engine::get_print_url( $post );
+		} else {
+			$permalink = get_permalink( $post );
+			$url       = $permalink ? add_query_arg( 'pdf', 'true', $permalink ) : null;
 		}
 
-		if ( ! Print_Engine::can_serve_print_for_post( $post ) ) {
-			return false;
+		if ( ! $url ) {
+			return null;
 		}
 
-		return true;
+		if ( '' !== $base_url ) {
+			$site_url = rtrim( site_url(), '/' );
+			$url      = rtrim( $base_url, '/' ) . substr( $url, strlen( $site_url ) );
+		}
+
+		return \PRC\Primitives\Signed_Fetch\sign_url( $url, Print_Access::SIGNED_FETCH_PURPOSE, (int) $post->ID );
 	}
 
 	/**
@@ -191,7 +238,7 @@ class Pdf_Export {
 		}
 
 		$owner = self::resolve_pdf_owner_post( $ref_post );
-		if ( ! $owner || ! $this->can_generate_for_post( $owner ) ) {
+		if ( ! $owner || ! $this->can_auto_generate_for_post( $owner ) ) {
 			return;
 		}
 
@@ -243,7 +290,7 @@ class Pdf_Export {
 		}
 
 		$owner = self::resolve_pdf_owner_post( $post );
-		if ( ! $owner || ! $this->can_generate_for_post( $owner ) ) {
+		if ( ! $owner || ! $this->can_generate_on_demand( $owner ) ) {
 			return false;
 		}
 
@@ -273,21 +320,14 @@ class Pdf_Export {
 	 */
 	public function generate_pdf( int $post_id, string $base_url = '' ): void {
 		$post = get_post( $post_id );
-		if ( ! $post || ! $this->can_generate_for_post( $post ) ) {
+		if ( ! $post || ! $this->can_generate_on_demand( $post ) ) {
 			return;
 		}
 
-		$print_url = Print_Engine::get_print_url( $post );
+		$print_url = self::get_render_url( $post, $base_url );
 		if ( ! $print_url ) {
 			throw new \RuntimeException( 'Could not resolve print URL.' );
 		}
-
-		if ( ! empty( $base_url ) ) {
-			$site_url  = rtrim( site_url(), '/' );
-			$print_url = rtrim( $base_url, '/' ) . substr( $print_url, strlen( $site_url ) );
-		}
-
-		$print_url = Print_Access::mint_machine_fetch_url( $print_url, (int) $post->ID );
 
 		$pdf_binary = $this->request_pdf_bytes( $print_url );
 		if ( is_wp_error( $pdf_binary ) ) {

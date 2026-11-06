@@ -234,10 +234,10 @@ class Rest_Api {
 			);
 		}
 
-		if ( ! $this->pdf_export->can_generate_for_post( $owner ) ) {
+		if ( ! $this->pdf_export->can_generate_on_demand( $owner ) ) {
 			return new \WP_Error(
 				'ineligible',
-				__( 'PDF generation is only available for published, public posts that support the print engine.', 'prc-print-engine' ),
+				__( 'PDF generation is only available for published, scheduled, pending, or draft posts that support the print engine and have no password.', 'prc-print-engine' ),
 				array( 'status' => 400 )
 			);
 		}

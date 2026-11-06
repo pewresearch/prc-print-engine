@@ -152,7 +152,7 @@ class Print_Engine {
 	public function add_query_vars( $qvars ) {
 		$qvars[] = 'print';
 		$qvars[] = 'pdf';
-		return Print_Access::register_query_vars( $qvars );
+		return $qvars;
 	}
 
 	/**
@@ -221,6 +221,10 @@ class Print_Engine {
 		}
 
 		if ( current_user_can( 'read_post', $post->ID ) ) {
+			return true;
+		}
+
+		if ( \PRC\Primitives\Signed_Fetch\request_authorizes( (int) $post->ID, Print_Access::SIGNED_FETCH_PURPOSE ) ) {
 			return true;
 		}
 
@@ -298,7 +302,10 @@ class Print_Engine {
 
 		status_header( 200 );
 
-		$is_public = ( 'publish' === $post->post_status && empty( $post->post_password ) );
+		// Ticketed fetches are anonymous, so a cached copy would reach visitors outside the print audience.
+		$is_public = 'publish' === $post->post_status
+			&& empty( $post->post_password )
+			&& ! \PRC\Primitives\Signed_Fetch\request_authorizes( (int) $post->ID, Print_Access::SIGNED_FETCH_PURPOSE );
 		if ( $is_public ) {
 			header( 'Cache-Control: public, max-age=300' );
 			header( 'Vary: Cookie' );
@@ -750,14 +757,34 @@ class Print_Engine {
 		if ( empty( $chapters ) ) {
 			return array( $parent_post );
 		}
-		$posts = array();
+		$statuses = self::package_chapter_statuses( $parent_post );
+		$posts    = array();
 		foreach ( $chapters as $chapter ) {
 			$chapter_post = get_post( $chapter['id'] );
-			if ( $chapter_post && 'publish' === $chapter_post->post_status ) {
+			if ( $chapter_post && in_array( $chapter_post->post_status, $statuses, true ) ) {
 				$posts[] = $chapter_post;
 			}
 		}
 		return $posts;
+	}
+
+	/**
+	 * Chapter statuses a package's print document and PDF include.
+	 *
+	 * A published package shows only published chapters. An unpublished
+	 * package renders for review, so its unpublished chapters belong in it.
+	 * Reads the stored status: a signed draft render's root is an in-request
+	 * copy marked `publish`.
+	 *
+	 * @param \WP_Post $root Package root post.
+	 * @return string[]
+	 */
+	public static function package_chapter_statuses( \WP_Post $root ): array {
+		if ( 'publish' === get_post_status( $root->ID ) ) {
+			return array( 'publish' );
+		}
+
+		return Pdf_Export::ON_DEMAND_STATUSES;
 	}
 
 	/**
@@ -2222,8 +2249,8 @@ class Print_Engine {
 	/**
 	 * Build static TOC items for a report or article (no Interactivity API / client JS).
 	 *
-	 * Aligns chapter set with get_all_report_posts() publish filtering. When
-	 * package parts exist, emit part labels followed by their published chapters.
+	 * Aligns chapter set with get_all_report_posts() status filtering. When
+	 * package parts exist, emit part labels followed by their included chapters.
 	 *
 	 * @param \WP_Post $post Parent report or article post.
 	 * @return array<int, array{label:string,href:string,is_part?:bool}>

@@ -442,59 +442,13 @@ class Pdf_Export {
 	 * @return string|\WP_Error
 	 */
 	public function request_screenshot_bytes( string $url, string $selector, int $wait_ms = 10000 ) {
-		$endpoints = self::get_endpoints();
-		$endpoint  = $endpoints['screenshot_element'] ?? '';
-		if ( '' === $endpoint ) {
-			return new \WP_Error( 'print_engine_screenshot', 'screenshot_element endpoint is not configured.' );
-		}
-
-		$firebase = new \PRC\Platform\Firebase();
-		$id_token = $firebase->get_id_token( $endpoint );
-		if ( is_wp_error( $id_token ) ) {
-			return $id_token;
-		}
-
-		$response = wp_remote_post(
-			$endpoint,
+		return ( new \PRC\Platform\Firebase() )->screenshot_element(
 			array(
-				'timeout' => 120, // phpcs:ignore WordPressVIPMinimum.Performance.RemoteRequestTimeout.timeout_timeout -- Matches the screenshotElement function's 120s timeoutSeconds.
-				'headers' => array(
-					'Authorization' => 'Bearer ' . $id_token,
-					'Content-Type'  => 'application/json',
-					'Accept'        => 'image/png',
-				),
-				'body'    => wp_json_encode(
-					array(
-						'url'       => $url,
-						'selector'  => $selector,
-						'waitMs'    => $wait_ms,
-						'basicAuth' => $this->gate_credentials( $url ),
-					)
-				),
+				'url'      => $url,
+				'selector' => $selector,
+				'waitMs'   => $wait_ms,
 			)
 		);
-
-		if ( is_wp_error( $response ) ) {
-			return $response;
-		}
-
-		$code = (int) wp_remote_retrieve_response_code( $response );
-		$body = wp_remote_retrieve_body( $response );
-
-		if ( $code < 200 || $code >= 300 || '' === $body ) {
-			$message = 'Screenshot failed';
-			$json    = json_decode( $body, true );
-			if ( is_array( $json ) && ! empty( $json['error'] ) ) {
-				$message = (string) $json['error'];
-			}
-			return new \WP_Error(
-				'print_engine_screenshot',
-				$message,
-				array( 'status' => $code )
-			);
-		}
-
-		return $body;
 	}
 
 	/**

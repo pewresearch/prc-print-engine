@@ -11,6 +11,8 @@ const SIZED_IMAGE_CLASSES = [
 
 const STACK_WIDTH = 640;
 
+export const FLOAT_LEAD_CLASS = 'print-engine-chart-unit__lead--float';
+
 // The article title header counts as a heading, not body copy.
 export const PRINT_HEADING_SELECTOR =
 	'h1, h2, h3, h4, h5, h6, .print-engine-body-header';
@@ -127,9 +129,12 @@ function shouldStackFigure(figure) {
 /**
  * Wrap headings + the intro paragraph immediately before each chart.
  *
- * `break-after: avoid` on the lead keeps that group with the figure when
- * Paged.js introduces a page break. The figure stays a sibling so floats
- * still wrap following copy.
+ * The figure stays a sibling so floats still wrap following copy. A lead
+ * before a stacked (in-flow) chart gets `break-after: avoid`, which keeps the
+ * group together on a page break. A lead before a floated chart is marked
+ * FLOAT_LEAD_CLASS and has no `break-after: avoid`: a float is not a break
+ * point, so the rule would bind to the next paragraph instead of the chart.
+ * The float guard keeps a floated chart with its lead.
  *
  * @param {DocumentFragment|Element} root Content root.
  */
@@ -145,6 +150,7 @@ function wrapChartIntroLeads(root) {
 			prev.classList &&
 			prev.classList.contains('print-engine-chart-unit__lead')
 		) {
+			markFloatLead(prev, figure);
 			return;
 		}
 
@@ -159,7 +165,22 @@ function wrapChartIntroLeads(root) {
 		collected.forEach((node) => {
 			lead.appendChild(node);
 		});
+		markFloatLead(lead, figure);
 	});
+}
+
+/**
+ * Mark a lead whose chart floats (see wrapChartIntroLeads).
+ *
+ * @param {Element} lead   Lead wrapper.
+ * @param {Element} figure Its chart.
+ */
+function markFloatLead(lead, figure) {
+	const floats =
+		!figure.classList.contains('print-engine-chart--stack') &&
+		(figure.classList.contains('alignright') ||
+			figure.classList.contains('alignleft'));
+	lead.classList.toggle(FLOAT_LEAD_CLASS, floats);
 }
 
 /**

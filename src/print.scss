@@ -1007,15 +1007,59 @@ $color-text-muted: #595959;
 	}
 }
 
+// A heading's own `break-after: avoid` at the end of a floated chart's lead
+// would leak to the next paragraph, as the lead's would. Not nested under
+// .print-engine-pdf-view: Paged.js applies break rules by querying the
+// content fragment, which has no body element.
+.print-engine-chart-unit__lead--float > :last-child {
+	break-after: auto;
+	page-break-after: auto;
+}
+
 // Companion charts float right only. 640-wide charts stack (no wrap).
 // Keep heading + intro with the figure on a page break without creating a BFC
 // that would trap the float (following copy still wraps beside the chart).
+// A float is not a break point, so `break-after: avoid` on a lead before a
+// floated chart would bind to the next paragraph; float-guard.js keeps those
+// leads with their charts instead.
 .print-engine-pdf-view {
 	.print-engine-chart-unit__lead {
 		break-inside: avoid;
 		page-break-inside: avoid;
+	}
+
+	.print-engine-chart-unit__lead:not(.print-engine-chart-unit__lead--float) {
 		break-after: avoid;
 		page-break-after: avoid;
+	}
+
+	// A section (H2–H4) starts below any chart floated in the section before.
+	.print-engine-article__content,
+	.print-engine-chapter__content {
+		h2,
+		h3,
+		h4 {
+			clear: both;
+		}
+	}
+
+	// Box cut edges (box-guard.js): no padding or border where Paged.js splits
+	// a shaded box. `!important` beats the editor's inline padding, which also
+	// beats Paged.js's own split resets.
+	.print-engine-box[data-split-to] {
+		padding-bottom: 0 !important;
+		margin-bottom: 0 !important;
+		border-bottom-width: 0 !important;
+		border-bottom-left-radius: 0 !important;
+		border-bottom-right-radius: 0 !important;
+	}
+
+	.print-engine-box[data-split-from] {
+		padding-top: 0 !important;
+		margin-top: 0 !important;
+		border-top-width: 0 !important;
+		border-top-left-radius: 0 !important;
+		border-top-right-radius: 0 !important;
 	}
 
 	figure.print-engine-chart.alignleft,

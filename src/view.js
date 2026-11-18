@@ -6,16 +6,12 @@
 import domReady from '@wordpress/dom-ready';
 
 /**
- * External Dependencies
- */
-import { Previewer } from 'pagedjs';
-
-/**
  * Lets webpack process CSS, SASS or SCSS files referenced in JavaScript files.
  *
  * @see https://www.npmjs.com/package/@wordpress/scripts#using-css
  */
 import './print.scss';
+import { markPrintBoxes } from './box-guard';
 import { reflowPrintCharts } from './chart-reflow';
 import { registerFloatGuard } from './float-guard';
 import { registerPageTopFigures } from './page-top-figures';
@@ -25,6 +21,8 @@ import {
 	getPrintImageWidth,
 	preparePrintLayout,
 } from './print-layout';
+import { paginate, stampFillDecisions } from './paginate';
+import { tagPrintSections } from './print-sections';
 
 /**
  * Remove `@media print { ... }` blocks with brace-balanced matching.
@@ -312,6 +310,8 @@ function prepareContentForPagination(html) {
 	template.innerHTML = html;
 
 	reflowPrintCharts(template.content);
+	markPrintBoxes(template.content);
+	tagPrintSections(template.content);
 
 	const pageContentMax = '7.5in';
 
@@ -582,22 +582,25 @@ async function runPagedPreview() {
 	const stopWatch = watchPageProgress(contentEl);
 	registerFloatGuard();
 	registerPageTopFigures();
-	const previewer = new Previewer();
+	let paginatedHtml = contentHtml;
 
 	try {
-		const flow = await previewer.preview(
-			contentHtml,
-			stylesheets,
-			contentEl
-		);
+		const result = await paginate(contentHtml, stylesheets, contentEl);
+		const { flow } = result;
+		paginatedHtml = result.html;
+		stampFillDecisions(contentEl);
+		document.body.dataset.printPasses = String(result.passes);
 
 		if (flow && typeof flow.total === 'number') {
 			// eslint-disable-next-line no-console
-			console.log(`Print engine: laid out ${flow.total} pages.`);
+			console.log(
+				`Print engine: laid out ${flow.total} pages in ${result.passes} pass(es).`
+			);
 		}
 
-		const chapterTargets = (contentHtml.match(/\sid="chapter-\d+"/g) || [])
-			.length;
+		const chapterTargets = (
+			paginatedHtml.match(/\sid="chapter-\d+"/g) || []
+		).length;
 		const chapterPages = new Set(
 			Array.from(
 				contentEl.querySelectorAll(

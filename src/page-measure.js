@@ -50,14 +50,28 @@ export function contentBottomBefore(node, rendered, bounds) {
 			continue;
 		}
 		const margin = parseFloat(getComputedStyle(el).marginBottom || '0');
+		// Chromium can stretch a heading's box (`break-after: avoid`) down the
+		// column; use its last text line instead.
+		const textBottom =
+			STRETCHABLE.test(el.tagName) || el.matches(TITLE_BLOCKS)
+				? contentBottomOf(el, bounds)
+				: null;
 		for (const rect of el.getClientRects()) {
 			if (rect.height > 0 && rect.left < bounds.right - TOLERANCE_PX) {
-				bottom = Math.max(bottom, rect.bottom + margin);
+				const elBottom =
+					null === textBottom
+						? rect.bottom
+						: Math.min(rect.bottom, textBottom);
+				bottom = Math.max(bottom, elBottom + margin);
 			}
 		}
 	}
 	return bottom;
 }
+
+const STRETCHABLE = /^H[1-6]$/;
+const TITLE_BLOCKS =
+	'.print-engine-body-header, .print-engine-body-header > *, .print-engine-chapter__title';
 
 /**
  * Content height left on the page if it breaks before a node, in px.
@@ -71,6 +85,22 @@ export function filledBefore(node, rendered, bounds) {
 	return Math.min(
 		contentBottomBefore(node, rendered, bounds) - bounds.top,
 		bounds.height
+	);
+}
+
+/**
+ * Whether `other` comes before `node` in document order (and does not
+ * contain it).
+ *
+ * @param {Node} node  Reference node.
+ * @param {Node} other Node to test.
+ * @return {boolean} True when other precedes node.
+ */
+export function precedes(node, other) {
+	const position = node.compareDocumentPosition(other);
+	return (
+		Math.floor(position / Node.DOCUMENT_POSITION_PRECEDING) % 2 === 1 &&
+		Math.floor(position / Node.DOCUMENT_POSITION_CONTAINS) % 2 === 0
 	);
 }
 
@@ -90,6 +120,33 @@ export function hasBodyContentBefore(rendered, node, offset) {
 	} else {
 		range.setEndBefore(node);
 	}
+	return hasBodyContentIn(range, rendered);
+}
+
+/**
+ * Whether text or media other than headings lies between the start of a
+ * range (such as a Paged.js overflow) and a node after it.
+ *
+ * @param {Element} rendered Page content wrapper.
+ * @param {Range}   from     Range whose start is tested.
+ * @param {Node}    node     Node after that start.
+ * @return {boolean} True when body content sits between them.
+ */
+export function hasBodyContentBetween(rendered, from, node) {
+	const range = document.createRange();
+	range.setStart(from.startContainer, from.startOffset);
+	range.setEndBefore(node);
+	return !range.collapsed && hasBodyContentIn(range, rendered);
+}
+
+/**
+ * Whether a range on the page holds text or media other than headings.
+ *
+ * @param {Range}   range    Range on the page.
+ * @param {Element} rendered Page content wrapper.
+ * @return {boolean} True when it holds body content.
+ */
+function hasBodyContentIn(range, rendered) {
 	// Runs on every Paged.js overflow check, so count characters instead of
 	// cloning the page.
 	const visibleChars = (text) => text.replace(/\s+/g, '').length;

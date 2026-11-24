@@ -1154,6 +1154,28 @@ $color-text-muted: #595959;
 		margin-left: auto !important;
 		margin-right: 0 !important;
 	}
+
+	// An H5 or H6 a delayed chart stopped at (chart-delay.js) starts below
+	// the chart, not beside it.
+	.print-engine-subheading--clear {
+		clear: both !important;
+	}
+
+	// A chart that is the only content on its page (lone-chart.js) is
+	// centered instead of leaving an empty column beside it.
+	figure.print-engine-figure--alone {
+		float: none !important;
+		clear: both !important;
+		margin-left: auto !important;
+		margin-right: auto !important;
+
+		// A height-capped image is narrower than its figure.
+		img {
+			display: block;
+			margin-left: auto !important;
+			margin-right: auto !important;
+		}
+	}
 }
 
 // Viewport-height covers (min-height: 100vh) are taller than the text well in

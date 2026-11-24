@@ -334,7 +334,11 @@ class Print_Engine {
 		if ( $is_report ) {
 			$cover_title = get_the_title( $report_post );
 			foreach ( $this->get_all_report_posts( $report_post ) as $chapter_post ) {
-				$prepared         = $this->prepare_print_body( $chapter_post, $seen_hashes );
+				$prepared         = $this->prepare_print_body(
+					$chapter_post,
+					$seen_hashes,
+					(int) $chapter_post->ID === (int) $report_post->ID
+				);
 				$research_html   .= $prepared['research_html'];
 				$pew_knight_html .= $prepared['pew_knight_html'];
 				$body_html       .= $this->render_chapter_content(
@@ -1073,15 +1077,20 @@ class Print_Engine {
 	/**
 	 * Prepare post body for print: strip opening chrome and extract about details.
 	 *
-	 * Strips consecutive opening front-matter (duplicate title/dek, first image,
+	 * Strips consecutive opening front-matter (duplicate title/dek, lede image,
 	 * About-this-research / Pew-Knight details). Also removes those details if they
 	 * appear later so they only live on the about page.
 	 *
-	 * @param \WP_Post $post         Post object.
-	 * @param array    $seen_hashes  Shared seen-hash set for cross-chapter dedupe.
+	 * Only the report (or article) itself has a lede image. A report chapter's
+	 * first image is content, often a chart right after the chapter's details
+	 * box, and a floated companion chart is never a lede.
+	 *
+	 * @param \WP_Post $post             Post object.
+	 * @param array    $seen_hashes      Shared seen-hash set for cross-chapter dedupe.
+	 * @param bool     $strip_lede_image Whether to strip an opening lede image (false for report chapters).
 	 * @return array{content:string,research_html:string,pew_knight_html:string}
 	 */
-	private function prepare_print_body( \WP_Post $post, array &$seen_hashes = array() ): array {
+	private function prepare_print_body( \WP_Post $post, array &$seen_hashes = array(), bool $strip_lede_image = true ): array {
 		$blocks               = parse_blocks( (string) $post->post_content );
 		$post_title           = get_the_title( $post );
 		$research_html        = '';
@@ -1141,10 +1150,13 @@ class Print_Engine {
 				break;
 			}
 
-			if ( 'core/image' === $name && ! $stripped_first_image ) {
-				$stripped_first_image = true;
-				++$i;
-				continue;
+			if ( 'core/image' === $name ) {
+				if ( $strip_lede_image && ! $stripped_first_image && $this->is_lede_image_block( $block ) ) {
+					$stripped_first_image = true;
+					++$i;
+					continue;
+				}
+				break;
 			}
 
 			if ( 'core/details' === $name ) {
@@ -1234,6 +1246,24 @@ class Print_Engine {
 			'research_html'   => $research_html,
 			'pew_knight_html' => $pew_knight_html,
 		);
+	}
+
+	/**
+	 * Whether an opening core/image block can be a lede image.
+	 *
+	 * A left- or right-aligned image, or one with a companion chart size class
+	 * (size-200/310/420-wide), is a chart that copy wraps around, not a lede.
+	 *
+	 * @param array $block Parsed core/image block.
+	 * @return bool
+	 */
+	private function is_lede_image_block( array $block ): bool {
+		$align = (string) ( $block['attrs']['align'] ?? '' );
+		if ( in_array( $align, array( 'left', 'right' ), true ) ) {
+			return false;
+		}
+		$classes = (string) ( $block['attrs']['className'] ?? '' ) . ' ' . (string) ( $block['innerHTML'] ?? '' );
+		return ! preg_match( '/\bsize-(?:200|310|420)-wide\b/', $classes );
 	}
 
 	/**
@@ -2497,7 +2527,11 @@ class Print_Engine {
 		$seen_hashes = array();
 		$output      = '';
 		foreach ( $posts as $chapter_post ) {
-			$prepared = $this->prepare_print_body( $chapter_post, $seen_hashes );
+			$prepared = $this->prepare_print_body(
+				$chapter_post,
+				$seen_hashes,
+				(int) $chapter_post->ID === (int) $report_post->ID
+			);
 			$output  .= $this->render_chapter_content(
 				$chapter_post,
 				$prepared['content'],

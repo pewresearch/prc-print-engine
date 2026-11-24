@@ -15,6 +15,7 @@ import { Previewer } from 'pagedjs';
  * Internal Dependencies
  */
 import {
+	applyHoistsAndFloats,
 	DELAYED_ATTR,
 	planChartDelays,
 	revertFailedDelays,
@@ -22,6 +23,8 @@ import {
 import {
 	getDecisions,
 	getDelayRequests,
+	getFloatRequests,
+	getHoistRequests,
 	resetPageFillLog,
 } from './page-fill-log';
 
@@ -79,6 +82,11 @@ export async function paginate(html, stylesheets, contentEl) {
 		let next = source;
 		if (pass < MAX_EXTRA_PASSES) {
 			next = revertFailedDelays(next, contentEl).html;
+			next = applyHoistsAndFloats(
+				next,
+				getHoistRequests(),
+				getFloatRequests()
+			).html;
 			if (delays.size) {
 				next = planChartDelays(next, contentEl, delays).html;
 			}

@@ -21,6 +21,7 @@ import {
 	getPrintImageWidth,
 	preparePrintLayout,
 } from './print-layout';
+import { centerLoneCharts } from './lone-chart';
 import { paginate, stampFillDecisions } from './paginate';
 import { tagPrintSections } from './print-sections';
 
@@ -589,6 +590,7 @@ async function runPagedPreview() {
 		const { flow } = result;
 		paginatedHtml = result.html;
 		stampFillDecisions(contentEl);
+		centerLoneCharts(contentEl);
 		document.body.dataset.printPasses = String(result.passes);
 
 		if (flow && typeof flow.total === 'number') {

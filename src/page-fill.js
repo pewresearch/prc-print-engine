@@ -11,12 +11,25 @@
 // Share of the text well a page must keep before a keep-together move.
 export const MIN_PAGE_FILL = 0.5;
 // The most a chart may shrink to fit beside its intro (charts only).
-export const MAX_FIT_SHRINK = 0.05;
+export const MAX_FIT_SHRINK = 0.07;
 // The most text, as a share of the page height, that may sit between an
 // intro and its chart when the chart moves to the next page.
 export const MAX_CHART_DELAY = 1 / 3;
 // The least content, in lines, each piece of a split box must keep.
 export const MIN_SPLIT_LINES = 3;
+// Room left under a scaled chart for rounding in Chrome's column layout.
+export const SHRINK_SLACK_PX = 4;
+
+/**
+ * Most a chart may move up in its section, in px (the same one-third of a
+ * page as a delay).
+ *
+ * @param {number} pageHeight Text well height in px.
+ * @return {number} Height in px.
+ */
+export function maxChartHoistPx(pageHeight) {
+	return pageHeight * MAX_CHART_DELAY;
+}
 
 /**
  * Most text, in px, that may sit between an intro and its delayed chart.
@@ -40,11 +53,29 @@ export function keepsPageFilled(filledPx, pageHeight) {
 }
 
 /**
+ * Whether a delayed chart's intro page must fill with the text after the
+ * chart: the MAX_CHART_DELAY limit would leave that page under
+ * MIN_PAGE_FILL, so the same section's text fills the page and the chart
+ * opens the next one.
+ *
+ * @param {Object} m            Measurements.
+ * @param {number} m.filled     Content height above the room on the intro's page in px.
+ * @param {number} m.used       Text the MAX_CHART_DELAY limit keeps before the chart in px.
+ * @param {number} m.pageHeight Text well height in px.
+ * @return {boolean} True to fill the intro's page.
+ */
+export function needsFillDelay(m) {
+	return !keepsPageFilled(m.filled + m.used, m.pageHeight);
+}
+
+/**
  * Choose where an intro and its chart go when they do not fit here.
  *
- * Tried in order: move both to the next page (only when this page stays
- * half full and both fit on one page), shrink the chart a little, delay the
- * chart past some of the following text, or fall back to today's break.
+ * Tried in order: move the chart up on this page, move both to the next
+ * page (only when this page stays half full and both fit on one page),
+ * shrink the chart a little, delay the chart past some of the following
+ * text, move both to the next page with the intro wrapping beside the chart,
+ * or fall back to today's break.
  *
  * @param {Object}  m                     Measurements.
  * @param {number}  m.pageHeight          Text well height in px.
@@ -54,21 +85,28 @@ export function keepsPageFilled(filledPx, pageHeight) {
  * @param {boolean} m.isChart             Whether the figure is a chart (only charts shrink).
  * @param {number}  m.fitScale            Image scale that fits the chart in place; 1 or more means no shrink needed.
  * @param {boolean} m.canDelay            Whether the chart may open the next page within its section.
- * @return {{action: ('together'|'shrink'|'delay'|'fallback'), scale?: number}} Decision.
+ * @param {boolean} [m.canHoist]          Whether the chart fits on this page when moved up in its section.
+ * @param {boolean} [m.groupFitsHoisted]  Whether intro and chart fit on one page with the intro wrapping beside the chart.
+ * @return {{action: ('hoist'|'together'|'shrink'|'delay'|'fallback'), scale?: number, hoist?: boolean}} Decision.
  */
 export function decideChartPlacement(m) {
-	if (
+	const canMoveGroup =
 		m.canBreakBeforeGroup &&
-		m.groupFitsOnePage &&
-		keepsPageFilled(m.filledBeforeGroup, m.pageHeight)
-	) {
-		return { action: 'together' };
+		keepsPageFilled(m.filledBeforeGroup, m.pageHeight);
+	if (m.canHoist) {
+		return { action: 'hoist' };
+	}
+	if (canMoveGroup && m.groupFitsOnePage) {
+		return { action: 'together', hoist: false };
 	}
 	if (m.isChart && m.fitScale >= 1 - MAX_FIT_SHRINK && m.fitScale < 1) {
 		return { action: 'shrink', scale: m.fitScale };
 	}
 	if (m.canDelay) {
 		return { action: 'delay' };
+	}
+	if (canMoveGroup && m.groupFitsHoisted) {
+		return { action: 'together', hoist: true };
 	}
 	return { action: 'fallback' };
 }
@@ -109,7 +147,7 @@ export function stuckFallbackScale(fitScale) {
  *
  * Breaking before the chart is a keep-together move for the content above
  * it, so it needs that page to stay half full or to end a section.
- * Otherwise the chart stays, unfloated at no more than a 5% shrink.
+ * Otherwise the chart stays, unfloated at no more than a 7% shrink.
  *
  * @param {Object}  m             Measurements.
  * @param {number}  m.filledAbove Content height above the chart in px.
@@ -125,13 +163,15 @@ export function decideStuckFallback(m) {
 
 /**
  * Whether to undo a delay: its intro opens a page that stays under half
- * full, and the chart fits under the intro with at most a 5% shrink.
+ * full, and the chart fits under the intro with at most a 7% shrink. Only
+ * the image shrinks; the caption and notes keep their height.
  *
  * @param {Object}  m                Measurements.
  * @param {boolean} m.opensPage      Whether the intro is at the top of its page.
  * @param {number}  m.pageFill       Fill of the intro's page, 0–1.
  * @param {number}  m.roomBelowIntro Room below the intro in px.
  * @param {number}  m.chartHeight    Chart content height in px (image and caption).
+ * @param {number}  m.imageHeight    Height of the chart image in px.
  * @param {number}  m.chartMargins   Chart top plus bottom margin in px.
  * @return {boolean} True to undo the delay.
  */
@@ -139,7 +179,10 @@ export function shouldRevertDelay(m) {
 	return (
 		m.opensPage &&
 		m.pageFill < MIN_PAGE_FILL &&
-		m.chartHeight * (1 - MAX_FIT_SHRINK) + m.chartMargins <=
+		m.chartHeight -
+			m.imageHeight * MAX_FIT_SHRINK +
+			m.chartMargins +
+			SHRINK_SLACK_PX <=
 			m.roomBelowIntro
 	);
 }

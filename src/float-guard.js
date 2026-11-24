@@ -37,18 +37,43 @@ import { Handler, registerHandlers } from 'pagedjs';
  * Internal Dependencies
  */
 import { adjustBreakForBoxes, boxOpenedBy } from './box-guard';
-import { DELAYED_ATTR, REVERTED_ATTR, STUCK_BREAK_ATTR } from './chart-delay';
+import {
+	DELAYED_ATTR,
+	FILL_USED_ATTR,
+	HOISTED_ATTR,
+	REVERTED_ATTR,
+	STUCK_BREAK_ATTR,
+} from './chart-delay';
+import {
+	firstNonHeadingChild,
+	fitsOnePageHoisted,
+	hoistTarget,
+	isStackedCompanion,
+} from './chart-hoist';
 import { isPrintChartFigure } from './chart-reflow';
+import {
+	figureContentHeight,
+	figureOnPage,
+	figureParts,
+} from './figure-measure';
 import {
 	decideChartPlacement,
 	decideStuckChart,
+	SHRINK_SLACK_PX,
 	stuckFallbackScale,
 } from './page-fill';
-import { recordDecision, requestDelay } from './page-fill-log';
+import {
+	hasDecision,
+	recordDecision,
+	requestDelay,
+	requestFloat,
+	requestHoist,
+} from './page-fill-log';
 import {
 	contentBottomBefore,
 	filledBefore,
 	hasBodyContentBefore,
+	hasBodyContentBetween,
 	outerHeight,
 	rangeFromNode,
 	TOLERANCE_PX,
@@ -56,8 +81,6 @@ import {
 
 const UNFLOATED_CLASS = 'print-engine-figure--unfloated';
 const LEAD_CLASS = 'print-engine-chart-unit__lead';
-// Room left under a scaled chart for rounding in Chrome's column layout.
-const SHRINK_SLACK_PX = 4;
 
 class FloatOverflowGuard extends Handler {
 	/**
@@ -68,7 +91,9 @@ class FloatOverflowGuard extends Handler {
 	 * @return {Range|null|undefined} New overflow, null for none, or undefined to keep.
 	 */
 	onOverflow(overflow, rendered, bounds, layout) {
-		const clip = findClippedFloat(rendered, overflow, bounds);
+		const clip =
+			findStackedChartBreak(rendered, overflow, bounds) ||
+			findClippedFloat(rendered, overflow, bounds);
 		let range = overflow;
 		if (clip?.breakBefore) {
 			range = rangeFromNode(clip.breakBefore, rendered);
@@ -156,7 +181,7 @@ function fitScaleFor(figure, rendered, bounds) {
  * block just above it, such as a chapter title) and up to MAX_CHART_DELAY of
  * the following text stay on this page and the next pass opens the next page
  * with the chart. A chart that cannot be delayed (no intro, an undone delay,
- * or no copy that fits above it) is unfloated at no more than a 5% shrink,
+ * or no copy that fits above it) is unfloated at no more than a 7% shrink,
  * never at full size. If it still does not fit, the page breaks before the
  * whole chart. chart-delay.js may instead ask the next pass to break
  * before the chart (STUCK_BREAK_ATTR) when the page above stays half full or
@@ -176,6 +201,16 @@ function placeStuckChart(figure, rendered, bounds) {
 		return { breakBefore: figure };
 	}
 	const lead = leadFor(figure) || headingAbove(figure);
+	const hoist = hoistTarget(figure, rendered, bounds);
+	if (hoist) {
+		requestHoist(
+			figure,
+			hoist.before,
+			`hoist:${Math.round(hoist.distance)}px`
+		);
+		unfloatWhole(figure);
+		return { reflow: true };
+	}
 	const isChart = isPrintChartFigure(figure);
 	const img = figure.querySelector('img');
 	const fitScale =
@@ -190,7 +225,11 @@ function placeStuckChart(figure, rendered, bounds) {
 
 	if ('shrink' === decision.action) {
 		scaleFigure(figure, decision.scale);
-		recordDecision(figure, `stuck:shrink:${decision.scale.toFixed(3)}`);
+		// At full size the chart only needed its page-top margin dropped;
+		// keep the label of the page that broke before it.
+		if (decision.scale < 1 || !hasDecision(figure)) {
+			recordDecision(figure, `stuck:shrink:${decision.scale.toFixed(3)}`);
+		}
 		if (!figureOnPage(figure, bounds)) {
 			// Keep the scaled size: at full size the heading plus chart would
 			// not fit and Paged.js would split the heading across pages.
@@ -208,6 +247,8 @@ function placeStuckChart(figure, rendered, bounds) {
 	unfloatWhole(figure);
 	if ('delay' === decision.action) {
 		requestDelay(figure, lead, { stuck: true });
+	} else {
+		requestFillOnlyDelay(figure, lead, { stuck: true });
 	}
 	// Still too tall at the largest allowed shrink: Paged.js would split the
 	// heading above line by line or leave the caption behind. Break before
@@ -239,68 +280,22 @@ function unfloatWhole(figure) {
 }
 
 /**
- * A figure's image and the children that are not the image (or its link).
+ * Ask for the one fill delay a chart whose delay was undone may take. The
+ * pass keeps its current layout; chart-delay.js applies the delay only if
+ * it fills the intro's page to MIN_PAGE_FILL.
  *
- * The image is often wrapped in an inline <a>, whose own rects do not
- * describe the block image inside it, so measure the image directly.
- *
- * @param {Element} figure Figure node.
- * @return {{img: Element|null, others: Element[]}} Parts.
+ * @param {Element} figure    Chart figure.
+ * @param {Element} lead      Its intro, or the block above it.
+ * @param {Object}  [options] requestDelay() options.
  */
-function figureParts(figure) {
-	const img = figure.querySelector('img');
-	const holder = img
-		? [...figure.children].find((child) => child.contains(img))
-		: null;
-	return {
-		img,
-		others: [...figure.children].filter((child) => child !== holder),
-	};
-}
-
-/**
- * Height of a figure's content: the image plus its other children.
- *
- * @param {Element} figure Figure node.
- * @return {number} Content height in px.
- */
-function figureContentHeight(figure) {
-	const { img, others } = figureParts(figure);
-	return (
-		(img ? img.getBoundingClientRect().height : 0) +
-		others.reduce((sum, child) => sum + outerHeight(child), 0)
-	);
-}
-
-/**
- * Client rects of a figure's pieces (image and other children, one rect per
- * column).
- *
- * @param {Element} figure Figure node.
- * @return {DOMRect[]} Non-empty rects.
- */
-function figurePieces(figure) {
-	const { img, others } = figureParts(figure);
-	const parts = img ? [img, ...others] : [figure];
-	return parts
-		.flatMap((part) => [...part.getClientRects()])
-		.filter((rect) => rect.width > 0 && rect.height > 0);
-}
-
-/**
- * Whether every piece of a figure sits inside the page content area.
- *
- * @param {Element} figure Figure node.
- * @param {DOMRect} bounds Page content area.
- * @return {boolean} True when nothing is clipped or pushed aside.
- */
-function figureOnPage(figure, bounds) {
-	return figurePieces(figure).every(
-		(rect) =>
-			rect.left < bounds.right - TOLERANCE_PX &&
-			rect.right <= bounds.right + TOLERANCE_PX &&
-			rect.bottom <= bounds.bottom + TOLERANCE_PX
-	);
+function requestFillOnlyDelay(figure, lead, options = {}) {
+	if (
+		lead &&
+		figure.hasAttribute(REVERTED_ATTR) &&
+		!figure.hasAttribute(FILL_USED_ATTR)
+	) {
+		requestDelay(figure, lead, { ...options, fillOnly: true });
+	}
 }
 
 /**
@@ -314,8 +309,15 @@ function figureOnPage(figure, bounds) {
  */
 function placeLeadAndChart(figure, lead, rendered, bounds) {
 	const groupStart = boxOpenedBy(lead);
+	const hoist = hoistTarget(figure, rendered, bounds);
+	const intro = firstNonHeadingChild(lead);
 	const decision = decideChartPlacement({
 		pageHeight: bounds.height,
+		canHoist: Boolean(hoist),
+		groupFitsHoisted:
+			Boolean(intro) &&
+			!figure.hasAttribute(HOISTED_ATTR) &&
+			fitsOnePageHoisted(lead, figure, bounds),
 		filledBeforeGroup: filledBefore(groupStart, rendered, bounds),
 		groupFitsOnePage: fitsOnePage(lead, figure, bounds),
 		canBreakBeforeGroup: hasBodyContentBefore(rendered, groupStart),
@@ -326,8 +328,20 @@ function placeLeadAndChart(figure, lead, rendered, bounds) {
 		canDelay: !figure.hasAttribute(REVERTED_ATTR),
 	});
 
+	if ('hoist' === decision.action) {
+		requestHoist(
+			figure,
+			hoist.before,
+			`hoist:${Math.round(hoist.distance)}px`
+		);
+		return { breakBefore: figure };
+	}
 	if ('together' === decision.action) {
-		recordDecision(figure, 'together');
+		if (decision.hoist) {
+			requestHoist(figure, intro, 'together:hoist');
+		} else {
+			recordDecision(figure, 'together');
+		}
 		return { breakBefore: groupStart };
 	}
 	if ('shrink' === decision.action) {
@@ -342,9 +356,13 @@ function placeLeadAndChart(figure, lead, rendered, bounds) {
 		return { breakBefore: figure };
 	}
 	recordDecision(figure, 'fallback');
-	return fitsOnePage(lead, figure, bounds)
-		? { breakBefore: groupStart }
-		: { breakBefore: figure };
+	if (fitsOnePage(lead, figure, bounds)) {
+		return { breakBefore: groupStart };
+	}
+	// Only when the intro stays on this page: a fill delay measures the room
+	// below it here.
+	requestFillOnlyDelay(figure, lead);
+	return { breakBefore: figure };
 }
 
 /**
@@ -370,6 +388,14 @@ function findClippedFloat(rendered, overflow, bounds) {
 	};
 	for (const figure of rendered.querySelectorAll('figure')) {
 		const isFloat = getComputedStyle(figure).float !== 'none';
+		if (
+			!isFloat &&
+			isStackedCompanion(figure) &&
+			!figureOnPage(figure, bounds) &&
+			firstNonHeadingChild(leadFor(figure))
+		) {
+			requestFloat(figure);
+		}
 		// A break inside the float (even at offset 0) leaves an empty figure
 		// shell here and its heading + intro without the chart; move the
 		// whole unit instead.
@@ -394,7 +420,7 @@ function findClippedFloat(rendered, overflow, bounds) {
 			figure.hasAttribute(DELAYED_ATTR) &&
 			hasBodyContentBefore(rendered, figure)
 		) {
-			return { breakBefore: figure };
+			return { breakBefore: breakTargetFor(figure, rendered) };
 		}
 		const lead = leadFor(figure);
 		if (lead && hasBodyContentBefore(rendered, lead)) {
@@ -403,7 +429,46 @@ function findClippedFloat(rendered, overflow, bounds) {
 		// Without body content before it, the node is already first on the
 		// page (moving it again would loop) or would strand a heading.
 		if (hasBodyContentBefore(rendered, figure)) {
-			return { breakBefore: figure };
+			// An intro at the top of the page: the chart may still fit if it
+			// moves up beside the intro.
+			const hoist = hoistTarget(figure, rendered, bounds);
+			if (hoist) {
+				requestHoist(
+					figure,
+					hoist.before,
+					`hoist:${Math.round(hoist.distance)}px`
+				);
+				return { breakBefore: breakTargetFor(figure, rendered) };
+			}
+			// Or with a shrink of at most MAX_FIT_SHRINK, which is also what
+			// an undone delay counts on (shouldRevertDelay()). Past that,
+			// delay the chart so the intro keeps the text after it.
+			const fitScale = figure.hasAttribute('data-print-shrunk')
+				? 0
+				: fitScaleFor(figure, rendered, bounds);
+			const decision = decideStuckChart({
+				isChart: isPrintChartFigure(figure),
+				fitScale: Math.min(fitScale, 1),
+				canDelay: false,
+			});
+			if ('shrink' === decision.action && fitScale < 1) {
+				scaleFigure(figure, decision.scale);
+				if (figureOnPage(figure, bounds)) {
+					recordDecision(
+						figure,
+						`shrink:${decision.scale.toFixed(3)}`
+					);
+					return { reflow: true };
+				}
+			}
+			if (lead && !figure.hasAttribute(REVERTED_ATTR)) {
+				// The in-place fit already failed: shouldRevertDelay() must not
+				// undo this delay, but a stale one is still planned again.
+				requestDelay(figure, lead, { fitTried: true });
+				return { breakBefore: figure };
+			}
+			requestFillOnlyDelay(figure, lead, { fitTried: true });
+			return { breakBefore: breakTargetFor(figure, rendered) };
 		}
 		if (figureContentHeight(figure) > bounds.height / 2) {
 			return { stuck: figure };
@@ -433,6 +498,101 @@ function fitsOnePage(lead, figure, bounds) {
 			parseFloat(style.marginBottom || '0') <=
 		bounds.height - TOLERANCE_PX
 	);
+}
+
+/**
+ * Where to break so a chart moves to the next page without leaving the
+ * headings right above it behind (no heading ends a page). Headings
+ * directly before the chart, and a lead that holds only headings before it,
+ * move with it.
+ *
+ * @param {Element} figure   Chart that moves to the next page.
+ * @param {Element} rendered Page content wrapper.
+ * @return {Element} Node to break before.
+ */
+function breakTargetFor(figure, rendered) {
+	let target = figure;
+	for (;;) {
+		const prev = target.previousElementSibling;
+		if (prev && /^H[1-6]$/.test(prev.tagName)) {
+			target = prev;
+			continue;
+		}
+		if (
+			prev &&
+			prev.classList.contains(LEAD_CLASS) &&
+			!firstNonHeadingChild(prev)
+		) {
+			target = prev;
+			continue;
+		}
+		// Every earlier child of this lead is a heading: move the whole lead.
+		const parent = target.parentElement;
+		if (
+			!prev &&
+			parent?.classList.contains(LEAD_CLASS) &&
+			parent !== rendered
+		) {
+			target = parent;
+			continue;
+		}
+		break;
+	}
+	return hasBodyContentBefore(rendered, target)
+		? boxOpenedBy(target)
+		: figure;
+}
+
+/**
+ * A stacked (in-flow) chart whose intro plus chart are taller than a page:
+ * the intro's keep-with-next can never be honored, and Paged.js strands the
+ * intro on a page of its own. Delay the chart instead, like a floated one:
+ * the intro and up to MAX_CHART_DELAY of following text stay on this page
+ * and the next page opens with the chart.
+ *
+ * @param {Element}         rendered Page content wrapper.
+ * @param {Range|undefined} overflow Overflow range Paged.js found.
+ * @param {DOMRect}         bounds   Page content area.
+ * @return {{breakBefore: Element}|null} Fix, or null.
+ */
+function findStackedChartBreak(rendered, overflow, bounds) {
+	if (!overflow) {
+		return null;
+	}
+	for (const figure of rendered.querySelectorAll('figure')) {
+		// A companion-width centered chart floats first (rule 6).
+		if (
+			!isPrintChartFigure(figure) ||
+			getComputedStyle(figure).float !== 'none' ||
+			isStackedCompanion(figure) ||
+			figure.hasAttribute(DELAYED_ATTR) ||
+			figure.hasAttribute(REVERTED_ATTR)
+		) {
+			continue;
+		}
+		const lead = leadFor(figure);
+		if (!lead || !firstNonHeadingChild(lead)) {
+			continue;
+		}
+		// Only an overflow that starts at the group, or at headings kept
+		// with it: one that starts at earlier copy also contains the lead,
+		// but must break there.
+		const start = overflow.startContainer;
+		const atGroup =
+			lead.contains(start) ||
+			figure.contains(start) ||
+			(overflow.comparePoint(lead, 0) >= 0 &&
+				!hasBodyContentBetween(rendered, overflow, lead));
+		if (!atGroup || fitsOnePage(lead, figure, bounds)) {
+			continue;
+		}
+		if (!hasBodyContentBefore(rendered, lead) && !lead.textContent.trim()) {
+			continue;
+		}
+		requestDelay(figure, lead);
+		return { breakBefore: figure };
+	}
+	return null;
 }
 
 /**
